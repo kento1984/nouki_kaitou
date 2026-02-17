@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c:*)",
+      "Bash(python debug_delivery.py:*)",
+      "Bash(ls:*)",
+      "Bash(python validate_delivery.py:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(dir \"C:\\\\Users\\\\kento.kashiwabara\\\\nouki_kaitou\"\" | grep -E \".xlsx)",
+      "Bash(.xls)",
+      "Bash(validation)",
+      "Bash(comparison \")",
+      "Bash(iconv:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

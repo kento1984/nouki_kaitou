@@ -1,0 +1,777 @@
+"""納期回答書作成 CLIエントリーポイント
+
+コマンドラインまたは対話モードで納期回答書を生成する。
+
+使用例:
+    # 対話モード
+    python -m nouki_kaitou.main
+
+    # コマンドライン指定
+    python -m nouki_kaitou.main --source path/to/10PM.XLS --customer "顧客名"
+
+    # メールHTML出力付き
+    python -m nouki_kaitou.main --source path/to/10PM.XLS --email-mode draft
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import os
+import pickle
+import sys
+import time
+import unicodedata
+from pathlib import Path
+from typing import Optional
+
+from openpyxl import load_workbook
+
+from nouki_kaitou.cache import build_all_caches
+from nouki_kaitou.config import load_branch_settings, load_holidays
+from nouki_kaitou.customer import check_customer_master
+from nouki_kaitou.data_loader import (
+    get_column_positions,
+    get_data_rows_range,
+    is_data_row,
+    load_source_file,
+    parse_order_row,
+)
+from nouki_kaitou.email_builder import create_emails
+from nouki_kaitou.history import (
+    CONFIRMING_SHEET_NAME,
+    HISTORY_SHEET_NAME,
+    clean_confirming_list,
+    initialize_delivery_history,
+    load_delivery_history,
+    save_confirming_list,
+    save_delivery_history,
+)
+from nouki_kaitou.models import BranchSettings, OrderRow, ReportResult
+from nouki_kaitou.report_generator import (
+    create_delivery_report,
+    create_delivery_report_by_order_numbers,
+)
+from nouki_kaitou.utils import get_output_folder
+
+
+def _normalize(s: str) -> str:
+    """Unicode正規化（NFC）して比較用文字列を返す。"""
+    return unicodedata.normalize("NFC", s)
+
+
+def _find_file_in_dir(directory: Path, target_name: str) -> Path | None:
+    """ディレクトリ内からファイルを探す（Unicode正規化で比較）。
+
+    Windows + MINGW環境ではファイル名のUnicode正規化形式（NFC/NFD）が
+    ずれることがあるため、正規化して比較する。
+    """
+    normalized_target = _normalize(target_name)
+    # まず直接パスで試す（最速）
+    direct = directory / target_name
+    if direct.exists():
+        return direct
+    # 見つからない場合はディレクトリ走査でNFC正規化比較
+    try:
+        for p in directory.iterdir():
+            if p.is_file() and _normalize(p.name) == normalized_target:
+                return p
+    except OSError:
+        pass
+    return None
+
+
+def _resolve_tool_folder(source_path: Path) -> Path:
+    """マスターファイルのあるツールフォルダを優先順で探索する。
+
+    探索順:
+        1. ソースファイルと同じフォルダ
+        2. ソースファイルの親の親フォルダ（受注一覧/17PM.xls → ツールフォルダ）
+        3. nouki_kaitouパッケージの親フォルダ（≒プロジェクトルート）
+        4. カレントワーキングディレクトリ
+
+    メーカー一覧.xlsxが最初に見つかったフォルダを返す。
+    どこにもなければCWDを返す。
+    """
+    marker = "メーカー一覧.xlsx"
+    candidates = [
+        source_path.parent.resolve(),
+        source_path.parent.parent.resolve(),
+        Path(__file__).resolve().parent.parent,
+        Path(os.getcwd()).resolve(),
+    ]
+    # 重複除去（順序維持）
+    seen: set[Path] = set()
+    for folder in candidates:
+        if folder in seen:
+            continue
+        seen.add(folder)
+        if _find_file_in_dir(folder, marker) is not None:
+            return folder
+    # どこにもなければCWD
+    return Path(os.getcwd())
+
+
+def find_source_file(directory: Path) -> Path | None:
+    """ディレクトリから10PM.XLSを探す。
+
+    大文字小文字を区別せず、10PM.XLS / 10PM.xls 等を検索。
+    複数見つかった場合は更新日時が最新のものを返す。
+    """
+    candidates: list[Path] = []
+    for p in directory.iterdir():
+        if p.is_file() and p.name.upper() == "10PM.XLS":
+            candidates.append(p)
+    if not candidates:
+        return None
+    # 更新日時が最新のものを返す
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def get_unique_customers(orders: list[OrderRow]) -> list[str]:
+    """OrderRowリストから重複なし顧客名リストを取得する。
+
+    出現順を維持する。
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for order in orders:
+        name = order.customer_name
+        if name and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
+def result_to_email_input(result: ReportResult) -> dict:
+    """ReportResultをcreate_emails用のdict形式に変換する。"""
+    return {
+        "customer_name": result.customer_name,
+        "file_path": result.file_path,
+        "stockout_info_list": result.stockout_info_list,
+        "tracking_info_list": result.tracking_info_list,
+        "bunno_info_list": result.bunno_info_list,
+        "rep_name": result.rep_name,
+        "bunno_completed_list": result.bunno_completed_list,
+    }
+
+
+def _load_sent_orders_cached(
+    history_path: Path,
+    ws_history: object,
+    ws_confirming: object,
+    cache: object,
+    holidays: object,
+    today: datetime.date | None = None,
+) -> dict[str, str]:
+    """送付履歴をキャッシュ付きで読み込む。
+
+    pickleキャッシュが有効な場合（xlsx未変更かつ同日）はキャッシュから
+    即座に読み込む。無効な場合は通常読み込みし、結果をキャッシュする。
+
+    Args:
+        history_path: 送付履歴.xlsxのパス
+        ws_history: 送付履歴シート（read_only）
+        ws_confirming: 確認中一覧シート（read_only）
+        cache: キャッシュストア
+        holidays: 祝日辞書
+        today: 基準日
+
+    Returns:
+        送付済み伝票辞書 dict[キー(受発注伝票|明細), 納期回答ステータス]
+    """
+    if today is None:
+        today = datetime.date.today()
+
+    cache_file = Path(str(history_path) + ".cache")
+
+    # キャッシュキー: xlsxの更新日時 + 本日日付
+    try:
+        xlsx_mtime = os.path.getmtime(str(history_path))
+    except OSError:
+        xlsx_mtime = 0
+    cache_key = f"{xlsx_mtime}|{today.isoformat()}"
+
+    # キャッシュ読み込み試行
+    if cache_file.exists():
+        try:
+            with open(cache_file, "rb") as f:
+                cached = pickle.load(f)
+            if isinstance(cached, dict) and cached.get("_key") == cache_key:
+                return cached["sent_orders"]
+        except (pickle.UnpicklingError, KeyError, EOFError, OSError):
+            pass
+
+    # 通常読み込み
+    sent_orders = load_delivery_history(
+        ws_history, ws_confirming, cache, holidays, today
+    )
+
+    # キャッシュ保存
+    try:
+        with open(cache_file, "wb") as f:
+            pickle.dump(
+                {
+                    "_key": cache_key,
+                    "sent_orders": sent_orders,
+                },
+                f,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+    except OSError:
+        pass
+
+    return sent_orders
+
+
+def parse_args() -> argparse.Namespace:
+    """コマンドライン引数をパースする。"""
+    parser = argparse.ArgumentParser(
+        description="納期回答書作成マクロ（Python版）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "引数なしで起動すると対話モードになります。\n"
+            "例:\n"
+            "  python -m nouki_kaitou.main\n"
+            '  python -m nouki_kaitou.main --source 10PM.XLS --customer "顧客名"\n'
+        ),
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        help="10PM.XLSのパス（省略時: カレントディレクトリを探索）",
+    )
+    parser.add_argument(
+        "--date-from",
+        type=str,
+        default=None,
+        help="期間開始日 YYYY/MM/DD",
+    )
+    parser.add_argument(
+        "--date-to",
+        type=str,
+        default=None,
+        help="期間終了日 YYYY/MM/DD",
+    )
+    parser.add_argument(
+        "--customer",
+        type=str,
+        default=None,
+        help="顧客名（省略時: 全顧客 or 対話で選択）",
+    )
+    parser.add_argument(
+        "--email-mode",
+        type=str,
+        choices=["send", "draft", "none"],
+        default="none",
+        help="メールモード: send=送信, draft=下書き, none=メール生成なし（デフォルト: none）",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="出力先ディレクトリ（省略時: 自動生成）",
+    )
+    parser.add_argument(
+        "--sender",
+        type=str,
+        default="",
+        help="送付者名（送付履歴に記録する名前）",
+    )
+    return parser.parse_args()
+
+
+def _parse_date_arg(date_str: str) -> datetime.date:
+    """YYYY/MM/DD形式の文字列をdatetime.dateに変換する。"""
+    try:
+        return datetime.datetime.strptime(date_str, "%Y/%m/%d").date()
+    except ValueError:
+        pass
+    try:
+        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError(
+            f"日付の形式が不正です: '{date_str}'（YYYY/MM/DD または YYYY-MM-DD）"
+        )
+
+
+def interactive_mode(args: argparse.Namespace, orders: list[OrderRow] | None = None) -> argparse.Namespace:
+    """対話モードで不足引数を補完する。
+
+    Args:
+        args: コマンドライン引数（一部が未指定の場合あり）
+        orders: 受注データ（顧客選択に使用。Noneならソースファイル確定後に読み込む）
+    """
+    print("=" * 50)
+    print("  納期回答書作成マクロ（対話モード）")
+    print("=" * 50)
+    print()
+
+    # 1. ソースファイル
+    if args.source is None:
+        default_file = find_source_file(Path.cwd())
+        if default_file:
+            prompt = f"10PM.XLSのパス [Enter で {default_file.name}]: "
+            user_input = input(prompt).strip()
+            if not user_input:
+                args.source = str(default_file)
+            else:
+                args.source = user_input
+        else:
+            args.source = input("10PM.XLSのパス: ").strip()
+
+    if not args.source or not Path(args.source).exists():
+        print(f"エラー: ファイルが見つかりません: {args.source}")
+        sys.exit(1)
+
+    # 2. 期間
+    if args.date_from is None:
+        user_input = input("期間開始日 (YYYY/MM/DD、Enter でスキップ): ").strip()
+        if user_input:
+            args.date_from = user_input
+
+    if args.date_to is None:
+        user_input = input("期間終了日 (YYYY/MM/DD、Enter でスキップ): ").strip()
+        if user_input:
+            args.date_to = user_input
+
+    # 3. 顧客選択
+    if args.customer is None and orders is not None:
+        customer_names = get_unique_customers(orders)
+        if customer_names:
+            print()
+            print("--- 顧客一覧 ---")
+            for i, name in enumerate(customer_names, 1):
+                print(f"  {i:3d}. {name}")
+            print()
+            user_input = input(
+                '顧客番号を入力 (複数はカンマ区切り、"all" で全顧客、Enter で全顧客): '
+            ).strip()
+            if user_input and user_input.lower() != "all":
+                try:
+                    indices = [int(x.strip()) for x in user_input.split(",")]
+                    selected = [customer_names[i - 1] for i in indices if 1 <= i <= len(customer_names)]
+                    if selected:
+                        # 複数顧客の場合はカンマ区切りで格納
+                        args.customer = ",".join(selected) if len(selected) > 1 else selected[0]
+                except (ValueError, IndexError):
+                    print("入力が不正です。全顧客で処理します。")
+
+    # 4. メールモード
+    if args.email_mode == "none":
+        user_input = input("メールモード (send/draft/none) [Enter で none]: ").strip().lower()
+        if user_input in ("send", "draft", "none"):
+            args.email_mode = user_input
+
+    # 5. 送付者名
+    if not args.sender:
+        user_input = input("送付者名 (Enter でスキップ): ").strip()
+        if user_input:
+            args.sender = user_input
+
+    print()
+    return args
+
+
+def _build_email_customers(cust_wb: object) -> set[str]:
+    """顧客マスターからメールアドレス登録済み顧客のセットを構築する。"""
+    email_customers: set[str] = set()
+    try:
+        cust_ws = cust_wb["顧客マスター"]
+    except KeyError:
+        return email_customers
+
+    for row in cust_ws.iter_rows(min_row=2, values_only=True):
+        name = str(row[0]).strip() if row[0] else ""
+        if not name:
+            continue
+        # E列（0-indexed: 4）以降にメールアドレスがあるか
+        for j in range(4, len(row)):
+            if row[j] and str(row[j]).strip():
+                email_customers.add(name)
+                break
+
+    return email_customers
+
+
+def _show_gui(args: argparse.Namespace) -> dict | None:
+    """GUI表示に必要なデータを読み込み、SelectionDialogを表示する。
+
+    Returns:
+        ダイアログの結果dict、またはキャンセル時None
+    """
+    source_path = Path(args.source)
+    tool_folder = _resolve_tool_folder(source_path)
+
+    # ソースファイル読み込み
+    source_data_raw = load_source_file(str(source_path))
+    cols = get_column_positions(source_data_raw)
+    if cols is None:
+        print("エラー: ヘッダー行の列位置を検出できませんでした。")
+        sys.exit(1)
+
+    orders: list[OrderRow] = []
+    for i in get_data_rows_range(source_data_raw, cols):
+        if is_data_row(source_data_raw, i, cols):
+            orders.append(parse_order_row(source_data_raw, i, cols))
+
+    if not orders:
+        print("処理対象の受注データがありません。")
+        sys.exit(1)
+
+    # マスターファイル読み込み（GUI表示用）
+    mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
+    mfg_wb = load_workbook(str(mfg_found), data_only=True) if mfg_found else None
+
+    cust_found = _find_file_in_dir(tool_folder, "顧客マスター_v2.xlsm")
+    if not cust_found:
+        print(f"エラー: 顧客マスターが見つかりません: {tool_folder}")
+        sys.exit(1)
+    cust_wb = load_workbook(str(cust_found), data_only=True)
+
+    # キャッシュ構築（master_customers用。confirming_wsはGUIに不要なのでNone）
+    cache = build_all_caches(mfg_wb, cust_wb, None, source_data_raw, cols)
+    branch = (
+        load_branch_settings(mfg_wb, source_data_raw, cols)
+        if mfg_wb is not None
+        else BranchSettings()
+    )
+
+    master_customers = set(cache.cust_days.keys())
+    email_customers = _build_email_customers(cust_wb)
+
+    from nouki_kaitou.gui import SelectionDialog
+
+    dialog = SelectionDialog(orders, branch, master_customers, email_customers)
+    return dialog.show()
+
+
+def run(args: argparse.Namespace) -> None:
+    """メイン処理を実行する。"""
+    execution_time = datetime.datetime.now()
+
+    # --- 1. ソースファイル読み込み ---
+    source_path = Path(args.source)
+    print(f"ソースファイル: {source_path}")
+    source_data_raw = load_source_file(str(source_path))
+
+    cols = get_column_positions(source_data_raw)
+    if cols is None:
+        print("エラー: ヘッダー行の列位置を検出できませんでした。")
+        print("10PM.XLSの形式を確認してください。")
+        sys.exit(1)
+
+    # --- 2. OrderRow変換 ---
+    orders: list[OrderRow] = []
+    for i in get_data_rows_range(source_data_raw, cols):
+        if is_data_row(source_data_raw, i, cols):
+            orders.append(parse_order_row(source_data_raw, i, cols))
+
+    print(f"受注データ: {len(orders)}件")
+
+    if not orders:
+        print("処理対象の受注データがありません。")
+        return
+
+    # --- 3. マスターファイル読み込み ---
+    tool_folder = _resolve_tool_folder(source_path)
+    print(f"ツールフォルダ: {tool_folder}")
+
+    mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
+    if mfg_found:
+        mfg_wb = load_workbook(str(mfg_found), data_only=True)
+    else:
+        print(f"警告: メーカー一覧が見つかりません: {tool_folder}")
+        print("  祝日カレンダー・営業所設定・メーカーキャッシュなしで続行します。")
+        mfg_wb = None
+
+    cust_found = _find_file_in_dir(tool_folder, "顧客マスター_v2.xlsm")
+    if not cust_found:
+        print(f"エラー: 顧客マスターが見つかりません: {tool_folder}")
+        sys.exit(1)
+    cust_wb = load_workbook(str(cust_found), data_only=True)
+
+    history_found = _find_file_in_dir(tool_folder, "送付履歴.xlsx")
+    history_path = history_found if history_found else tool_folder / "送付履歴.xlsx"
+    history_exists = history_found is not None
+
+    if history_exists:
+        # read_only=True で高速読み込み（書き込みは後で別途ロード）
+        history_wb_ro = load_workbook(str(history_found), read_only=True)
+    else:
+        print("送付履歴ファイルを新規作成します。")
+        history_wb_ro = initialize_delivery_history(str(history_path))
+
+    # --- 4. キャッシュ構築 ---
+    ws_confirming_ro = history_wb_ro[CONFIRMING_SHEET_NAME]
+    cache = build_all_caches(mfg_wb, cust_wb, ws_confirming_ro, source_data_raw, cols)
+    holidays = load_holidays(mfg_wb) if mfg_wb is not None else {}
+    branch = load_branch_settings(mfg_wb, source_data_raw, cols) if mfg_wb is not None else BranchSettings()
+
+    print(f"営業所: {branch.name}")
+
+    # --- 5. 送付履歴読み込み（pickleキャッシュ付き） ---
+    ws_history_ro = history_wb_ro[HISTORY_SHEET_NAME]
+    t0 = time.perf_counter()
+    sent_orders = _load_sent_orders_cached(
+        history_path, ws_history_ro, ws_confirming_ro, cache, holidays
+    )
+    history_elapsed = time.perf_counter() - t0
+    print(f"送付済み伝票: {len(sent_orders)}件 ({history_elapsed:.2f}s)")
+
+    # read_onlyワークブックを閉じる
+    if history_exists:
+        history_wb_ro.close()
+
+    # --- 6. モード判定・期間パース ---
+    order_numbers_mode = getattr(args, "order_numbers", None)
+
+    date_from: Optional[datetime.date] = None
+    date_to: Optional[datetime.date] = None
+    if not order_numbers_mode:
+        if args.date_from:
+            date_from = _parse_date_arg(args.date_from)
+        if args.date_to:
+            date_to = _parse_date_arg(args.date_to)
+
+        if date_from or date_to:
+            period_str = f"{date_from or '---'} ～ {date_to or '---'}"
+            print(f"期間: {period_str}")
+    else:
+        print(f"伝票番号指定モード: {len(order_numbers_mode)}件")
+
+    # --- 7. 顧客別事前グルーピング ---
+    orders_by_customer: dict[str, list[OrderRow]] = {}
+    for order in orders:
+        name = order.customer_name.strip()
+        if name:
+            if name not in orders_by_customer:
+                orders_by_customer[name] = []
+            orders_by_customer[name].append(order)
+
+    all_customer_names = list(orders_by_customer.keys())
+    master_customers = set(cache.cust_days.keys())
+
+    if order_numbers_mode:
+        # 伝票番号モード: 指定された番号から対象顧客を自動決定
+        order_number_set = set(order_numbers_mode)
+        target_names: set[str] = set()
+        for order in orders:
+            if order.order_number in order_number_set:
+                name = order.customer_name.strip()
+                if name and name in master_customers:
+                    target_names.add(name)
+        customer_names = sorted(target_names)
+        if not customer_names:
+            print("エラー: 指定された伝票番号に対応する顧客が見つかりません。")
+            return
+    elif args.customer:
+        # カンマ区切りの複数顧客に対応
+        selected_names = [n.strip() for n in args.customer.split(",")]
+        # 存在チェック
+        for name in selected_names:
+            if name not in all_customer_names:
+                print(f"警告: 顧客 '{name}' は受注データに存在しません。")
+        customer_names = [n for n in selected_names if n in all_customer_names]
+        if not customer_names:
+            print("エラー: 指定された顧客が受注データに見つかりません。")
+            return
+        # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
+        skipped = [n for n in customer_names if n not in master_customers]
+        customer_names = [n for n in customer_names if n in master_customers]
+        if skipped:
+            print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
+    else:
+        customer_names = all_customer_names
+        # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
+        skipped = [n for n in customer_names if n not in master_customers]
+        customer_names = [n for n in customer_names if n in master_customers]
+        if skipped:
+            print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
+
+    print(f"対象顧客: {len(customer_names)}件")
+
+    # 顧客マスターのメールアドレスチェック（警告のみ）
+    if args.email_mode != "none":
+        cust_ws = cust_wb["顧客マスター"]
+        missing = check_customer_master(customer_names, cust_ws)
+        if missing:
+            print("警告: 以下の顧客はメールアドレスが未登録です:")
+            print(missing)
+
+    # --- 8. 出力フォルダ ---
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = get_output_folder(str(tool_folder), execution_time)
+
+    print(f"出力先: {output_dir}")
+    print()
+
+    # --- 9. 回答書生成ループ ---
+    all_results: list[ReportResult] = []
+    gen_start = time.perf_counter()
+
+    for cust in customer_names:
+        if order_numbers_mode:
+            # 伝票番号指定モード
+            result = create_delivery_report_by_order_numbers(
+                source_data=orders_by_customer.get(cust, []),
+                customer_name=cust,
+                order_numbers=order_numbers_mode,
+                cache=cache,
+                output_dir=output_dir,
+                holidays=holidays,
+                branch=branch,
+                execution_time=execution_time,
+            )
+        else:
+            # 期間指定モード
+            result = create_delivery_report(
+                source_data=orders_by_customer.get(cust, []),
+                customer_name=cust,
+                sent_orders=sent_orders,
+                cache=cache,
+                output_dir=output_dir,
+                holidays=holidays,
+                branch=branch,
+                execution_time=execution_time,
+                date_from=date_from,
+                date_to=date_to,
+            )
+
+        if result:
+            all_results.append(result)
+            confirmed_count = len(result.confirmed_orders)
+            confirming_count = len(result.confirming_orders)
+            print(f"  生成: {result.file_path}")
+            print(f"    確定: {confirmed_count}件 / 確認中: {confirming_count}件")
+        else:
+            print(f"  スキップ: {cust}（対象データなし）")
+
+    gen_elapsed = time.perf_counter() - gen_start
+    print(f"\n回答書生成: {gen_elapsed:.2f}s")
+
+    print()
+    print(f"生成件数: {len(all_results)}件 / {len(customer_names)}顧客")
+
+    if not all_results:
+        print("生成対象のデータがありませんでした。")
+        return
+
+    # --- 10. 送付履歴保存（バッチ化して1回の読み書きで完了） ---
+    # 全顧客の結果をまとめてから1回だけ保存（毎回44K行の再読み書きを回避）
+    all_confirmed = []
+    all_confirming = []
+    for result in all_results:
+        all_confirmed.extend(result.confirmed_orders)
+        all_confirming.extend(result.confirming_orders)
+
+    has_updates = bool(all_confirmed or all_confirming)
+    if has_updates:
+        t_save = time.perf_counter()
+        if history_exists:
+            history_wb = load_workbook(str(history_path))
+        else:
+            history_wb = initialize_delivery_history(str(history_path))
+        ws_history = history_wb[HISTORY_SHEET_NAME]
+        ws_confirming = history_wb[CONFIRMING_SHEET_NAME]
+
+        if all_confirmed:
+            save_delivery_history(ws_history, all_confirmed, execution_time, args.sender)
+        if all_confirming:
+            save_confirming_list(ws_confirming, all_confirming, execution_time, args.sender)
+        if all_confirmed:
+            clean_confirming_list(ws_history, ws_confirming, all_confirmed, execution_time, args.sender)
+
+        history_wb.save(str(history_path))
+        save_elapsed = time.perf_counter() - t_save
+        print(f"送付履歴保存: {history_path} ({save_elapsed:.2f}s)")
+    else:
+        print("送付履歴: 更新なし")
+
+    # --- 11. メール生成 ---
+    if args.email_mode != "none" and all_results:
+        from nouki_kaitou.email_builder import (
+            create_outlook_drafts,
+            create_outlook_sends,
+        )
+
+        created_files = [result_to_email_input(r) for r in all_results]
+        cust_ws = cust_wb["顧客マスター"]
+        emails = create_emails(
+            created_files=created_files,
+            branch=branch,
+            customer_master_ws=cust_ws,
+            holidays=holidays,
+            cache=cache,
+            send_directly=(args.email_mode == "send"),
+        )
+
+        if emails:
+            if args.email_mode == "send":
+                # 直接送信
+                sent = create_outlook_sends(emails)
+                print(f"メール送信: {len(sent)}件")
+            elif args.email_mode == "draft":
+                # Outlook下書き作成
+                created = create_outlook_drafts(emails)
+                print(f"Outlook下書き作成: {len(created)}件")
+        else:
+            print("メール生成: 0件（宛先未登録等でスキップ）")
+
+    print()
+    print("完了しました。")
+
+
+def main() -> None:
+    """エントリーポイント。"""
+    args = parse_args()
+
+    # --- ソースファイル確定 ---
+    if args.source is None:
+        # 対話モードでソースファイルを選択
+        default_file = find_source_file(Path.cwd())
+        if default_file:
+            prompt = f"10PM.XLSのパス [Enter で {default_file.name}]: "
+            user_input = input(prompt).strip()
+            args.source = user_input if user_input else str(default_file)
+        else:
+            args.source = input("10PM.XLSのパス: ").strip()
+
+    if not args.source or not Path(args.source).exists():
+        print(f"エラー: ファイルが見つかりません: {args.source}")
+        sys.exit(1)
+
+    # --- GUIモード判定: --customer未指定ならGUI表示 ---
+    if args.customer is None:
+        gui_result = _show_gui(args)
+        if gui_result is None:
+            # キャンセル
+            print("キャンセルされました。")
+            return
+
+        # メール送信モード（GUIで選択された3択）
+        args.email_mode = gui_result.get("email_mode", "none")
+
+        if gui_result["mode"] == "period":
+            args.date_from = gui_result["date_from"].strftime("%Y/%m/%d")
+            args.date_to = gui_result["date_to"].strftime("%Y/%m/%d")
+            args.customer = ",".join(gui_result["customers"])
+        elif gui_result["mode"] == "ordernumber":
+            args.order_numbers = gui_result["order_numbers"]
+
+    try:
+        run(args)
+    except KeyboardInterrupt:
+        print("\n中断しました。")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\nエラーが発生しました: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    main()
