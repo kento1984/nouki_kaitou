@@ -5,7 +5,7 @@ cd /d "%~dp0"
 REM nouki_kaitouパッケージを認識させるため親ディレクトリをPYTHONPATHに追加
 set "PYTHONPATH=%~dp0..;%PYTHONPATH%"
 
-echo 10PM.XLSファイルを選択してください...
+echo SAPの受注一覧ファイルを選択してください...
 for /f "delims=" %%i in ('powershell -ExecutionPolicy Bypass -File "_select_file.ps1"') do set "SELECTED_FILE=%%i"
 
 if "%SELECTED_FILE%"=="" (
