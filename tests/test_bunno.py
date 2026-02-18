@@ -339,6 +339,15 @@ class TestExtractBunnoInfo:
         assert result[2].quantity == "3丁"
         assert result[2].date_str == "未定"
 
+    def test_case_unit(self):
+        """ケース単位の分納"""
+        result = extract_bunno_info("分納:10ケース 12/20,5ケース 1/15")
+        assert len(result) == 2
+        assert result[0].quantity == "10ケース"
+        assert result[0].date_str == "12/20"
+        assert result[1].quantity == "5ケース"
+        assert result[1].date_str == "1/15"
+
 
 # ============================================
 # RemoveBunnoText
