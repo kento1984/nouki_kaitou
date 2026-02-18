@@ -52,8 +52,8 @@ def _result(
 
 
 def _before_cutoff(hour: int, minute: int, cutoff: int) -> bool:
-    """締切時間より前かどうか（VBA: timeHour < cutoffHour Or (= And minute=0)）"""
-    return hour < cutoff or (hour == cutoff and minute == 0)
+    """締切時間より前かどうか（15:00ちょうど＝締切後）"""
+    return hour < cutoff
 
 
 def _resolve_storage_place(row: OrderRow, cache: CacheStore) -> str:
