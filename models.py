@@ -179,6 +179,7 @@ class StockoutEntry:
     manufacturer_name: str = ""   # メーカー名
     product_name: str = ""        # 品名
     quantity: str = ""            # 数量
+    delivery: str = ""            # 計算済み納期（CopyDataRow戻り値相当）
     approx_delivery: str = ""     # 概算入荷日（例: "3月上旬入荷予定"）
     order_number: str = ""        # 注番（グループ化用）
 

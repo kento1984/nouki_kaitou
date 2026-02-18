@@ -450,8 +450,11 @@ def _build_stockout_section(
         # 表示優先順位：アバウト納期 > 確定納期 > 入荷次第ご連絡
         if item.approx_delivery:
             delivery_text = h(item.approx_delivery)
-        else:
+        elif not item.delivery or item.delivery in ("欠品中", "確認中"):
             delivery_text = "入荷次第ご連絡"
+        else:
+            # 確定日付がある場合（確認中一覧で手入力された納期等）
+            delivery_text = h(item.delivery.replace("（欠品）", ""))
 
         parts.append(
             f"<div style='margin-left: 20px; color: #cc0000; "

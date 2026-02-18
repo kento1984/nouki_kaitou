@@ -301,6 +301,91 @@ class TestBuildEmailBodyHtmlStockout:
         )
         assert "入荷次第ご連絡" in result
 
+    def test_stockout_confirmed_delivery(self):
+        """確定納期あり → 確定納期を表示"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーX",
+                product_name="製品X",
+                quantity="30",
+                delivery="1月20日出荷予定",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "1月20日出荷予定" in result
+        assert "入荷次第ご連絡" not in result
+
+    def test_stockout_confirmed_delivery_removes_keppin_marker(self):
+        """確定納期の「（欠品）」マーカーが除去される"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーX",
+                product_name="製品X",
+                quantity="30",
+                delivery="1月20日出荷予定（欠品）",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "1月20日出荷予定" in result
+        assert "（欠品）" not in result
+        assert "入荷次第ご連絡" not in result
+
+    def test_stockout_approx_over_confirmed(self):
+        """approxとdelivery両方あり → approx優先"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーX",
+                product_name="製品X",
+                quantity="30",
+                delivery="1月20日出荷予定",
+                approx_delivery="3月上旬入荷予定",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "3月上旬入荷予定" in result
+        assert "1月20日出荷予定" not in result
+
+    def test_stockout_delivery_keppin_shows_nyuka_shidai(self):
+        """delivery="欠品中" → 入荷次第ご連絡"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーX",
+                product_name="製品X",
+                quantity="30",
+                delivery="欠品中",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "入荷次第ご連絡" in result
+
+    def test_stockout_delivery_kakuninchu_shows_nyuka_shidai(self):
+        """delivery="確認中" → 入荷次第ご連絡"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーX",
+                product_name="製品X",
+                quantity="30",
+                delivery="確認中",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "入荷次第ご連絡" in result
+
     def test_no_stockout_no_section(self):
         """欠品なしではセクションなし"""
         branch = BranchSettings(name="テスト")

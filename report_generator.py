@@ -764,6 +764,7 @@ def _collect_stockout_info(
         manufacturer_name=mfg,
         product_name=short_product,
         quantity=row.quantity,
+        delivery=delivery_status,
         approx_delivery=approx,
         order_number=row.order_number,
     ))
