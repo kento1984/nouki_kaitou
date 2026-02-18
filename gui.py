@@ -198,8 +198,8 @@ class SelectionDialog:
             ("1ヶ月", self._on_1month, "#64B5F6"),
         ]
 
-        x_pos = 0
-        btn_width = 82
+        x_pos = 4
+        btn_width = 88
         for text, cmd, color in shortcuts:
             btn = tk.Button(
                 frame, text=text, command=cmd,
@@ -215,39 +215,39 @@ class SelectionDialog:
             bg="#9C27B0", fg="white", font=("Yu Gothic UI", 10, "bold"),
             relief="raised", cursor="hand2",
         )
-        btn_all_period.place(x=440, y=2, width=64, height=64)
+        btn_all_period.place(x=472, y=2, width=64, height=64)
 
         # --- 下段: 日付入力 + 検索ボタン ---
         lbl_from = tk.Label(frame, text="開始:", bg="#E3F2FD",
                             font=("Yu Gothic UI", 10))
-        lbl_from.place(x=0, y=40, width=40, height=24)
+        lbl_from.place(x=4, y=40, width=40, height=24)
 
         self._txt_date_from = tk.Entry(frame, font=("Yu Gothic UI", 10),
                                        bg="white", width=14)
-        self._txt_date_from.place(x=42, y=40, width=120, height=24)
+        self._txt_date_from.place(x=46, y=40, width=120, height=24)
 
         lbl_to = tk.Label(frame, text="～ 終了:", bg="#E3F2FD",
                           font=("Yu Gothic UI", 10))
-        lbl_to.place(x=168, y=40, width=55, height=24)
+        lbl_to.place(x=170, y=40, width=55, height=24)
 
         self._txt_date_to = tk.Entry(frame, font=("Yu Gothic UI", 10),
                                      bg="white", width=14)
-        self._txt_date_to.place(x=225, y=40, width=120, height=24)
+        self._txt_date_to.place(x=227, y=40, width=141, height=24)
 
-        # 検索ボタン
+        # 検索ボタン（1ヶ月ボタンと同位置・同幅）
         btn_search = tk.Button(
             frame, text="検索", command=self._on_search,
             bg="#0277BD", fg="white", font=("Yu Gothic UI", 10, "bold"),
             relief="raised", cursor="hand2",
         )
-        btn_search.place(x=358, y=38, width=68, height=28)
+        btn_search.place(x=372, y=38, width=88, height=28)
 
         # ヒントラベル
         lbl_hint = tk.Label(
             frame, text="※ ボタンで期間を設定し、検索で顧客リストを更新します",
             bg="#E3F2FD", fg="#546E7A", font=("Yu Gothic UI", 8),
         )
-        lbl_hint.place(x=0, y=78, width=540, height=18)
+        lbl_hint.place(x=4, y=78, width=532, height=18)
 
     def _build_customer_frame(self) -> None:
         """顧客選択フレームのウィジェットを構築する。"""
@@ -258,11 +258,11 @@ class SelectionDialog:
             frame, text="クリックで選択/解除（複数選択可）",
             bg="#E8F4FD", fg="#37474F", font=("Yu Gothic UI", 9, "bold"),
         )
-        lbl_info.place(x=0, y=0, width=540, height=18)
+        lbl_info.place(x=4, y=4, width=532, height=18)
 
         # リストボックス + スクロールバー
         list_frame = tk.Frame(frame, bg="#E8F4FD")
-        list_frame.place(x=0, y=22, width=540, height=430)
+        list_frame.place(x=4, y=28, width=532, height=414)
 
         scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
