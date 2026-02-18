@@ -8,18 +8,18 @@ __pycache__/
 .pytest_cache/
 
 # Trace/debug scripts
-trace_*.py
+/trace_*.py
 
 # Generated output files
-comparison_result.xlsx
-validation_result.xlsx
-debug_output.txt
-edge_case_results.txt
-ghost_analysis.txt
-others_detail.txt
-trace_result.txt
-validation_final.txt
-validation_summary.txt
+/comparison_result.xlsx
+/validation_result.xlsx
+/debug_output.txt
+/edge_case_results.txt
+/ghost_analysis.txt
+/others_detail.txt
+/trace_result.txt
+/validation_final.txt
+/validation_summary.txt
 
 # Cache
 *.cache
