@@ -96,7 +96,7 @@ class SelectionDialog:
             borderwidth=1,
             anchor="center",
         )
-        lbl_title.place(x=12, y=6, width=540, height=24)
+        lbl_title.place(x=12, y=6, width=564, height=24)
 
         # --- モード切替ラジオボタン ---
         self._mode_var = tk.StringVar(value="period")
@@ -117,7 +117,7 @@ class SelectionDialog:
             relief="raised",
             borderwidth=2,
         )
-        self._opt_period.place(x=12, y=34, width=260, height=28)
+        self._opt_period.place(x=12, y=34, width=277, height=28)
 
         self._opt_ordernumber = tk.Radiobutton(
             root,
@@ -135,7 +135,7 @@ class SelectionDialog:
             relief="raised",
             borderwidth=2,
         )
-        self._opt_ordernumber.place(x=282, y=34, width=270, height=28)
+        self._opt_ordernumber.place(x=299, y=34, width=277, height=28)
 
         # --- 期間フレーム ---
         self._frame_period = tk.LabelFrame(
