@@ -28,6 +28,11 @@ __pycache__/
 .vscode/
 .idea/
 
+# PyInstaller
+/build/
+/dist/
+*.spec
+
 # OS
 Thumbs.db
 Desktop.ini
