@@ -182,6 +182,34 @@ class TestCopyDataRow:
         # デフォルトのfill（なし）
         assert ws.cell(row=7, column=1).fill.patternType is None
 
+    def test_customer_order_number_numeric(self):
+        """数字のみの貴社注番はint型で書き込まれる"""
+        wb = Workbook()
+        ws = wb.active
+        row = self._make_row(customer_order_number="12345")
+        copy_data_row(ws, 7, row)
+        val = ws.cell(row=7, column=3).value
+        assert val == 12345
+        assert isinstance(val, int)
+
+    def test_customer_order_number_alphanumeric(self):
+        """文字混じりの貴社注番はそのまま文字列"""
+        wb = Workbook()
+        ws = wb.active
+        row = self._make_row(customer_order_number="PO-001")
+        copy_data_row(ws, 7, row)
+        val = ws.cell(row=7, column=3).value
+        assert val == "PO-001"
+        assert isinstance(val, str)
+
+    def test_customer_order_number_empty(self):
+        """空の貴社注番はそのまま"""
+        wb = Workbook()
+        ws = wb.active
+        row = self._make_row(customer_order_number="")
+        copy_data_row(ws, 7, row)
+        assert ws.cell(row=7, column=3).value == ""
+
     def test_all_columns_written(self):
         """全12列が書き込まれる"""
         wb = Workbook()
