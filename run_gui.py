@@ -42,6 +42,11 @@ def main():
         app_main()
         return
 
+    # コンソールに案内表示
+    print("納期回答書作成ツール（Python版）")
+    print("SAPの受注一覧を選択してください...")
+    print()
+
     # ファイル選択ダイアログ
     source = select_source_file()
     if not source:
