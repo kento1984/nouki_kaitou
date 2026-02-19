@@ -495,6 +495,139 @@ class TestStockCompleted:
         # base_date=2/16(月), 次の水or金 = 2/18(水)
         assert result == "2月18日出荷予定"
 
+    def test_saturday_before_cutoff(self):
+        """在庫+処理完了+土曜10時 → 月曜起算→火曜配達予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 21),  # 土
+            time_value="10:00:00",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+            storage_place="関東商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 21), branch=BRANCH,
+        )
+        # 土→翌営業日=2/23(月)…祝日→2/24(火) 起算、10時<15時 → +1営業日=2/25(水)
+        assert result == "2月25日配達予定"
+
+    def test_saturday_after_cutoff(self):
+        """在庫+処理完了+土曜16時 → 月曜起算→翌々営業日配達予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 21),  # 土
+            time_value="16:00:00",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+            storage_place="関東商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 21), branch=BRANCH,
+        )
+        # 土→翌営業日=2/24(火) 起算、16時>=15時 → +2営業日=2/26(木)
+        assert result == "2月26日配達予定"
+
+    def test_sunday_before_cutoff(self):
+        """在庫+処理完了+日曜10時 → 月曜起算→火曜配達予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 22),  # 日
+            time_value="10:00:00",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+            storage_place="関東商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 22), branch=BRANCH,
+        )
+        # 日→翌営業日=2/23(月)…祝日→2/24(火) 起算、10時<15時 → +1営業日=2/25(水)
+        assert result == "2月25日配達予定"
+
+    def test_holiday_before_cutoff(self):
+        """在庫+処理完了+祝日10時 → 翌営業日起算→配達予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 23),  # 月・天皇誕生日
+            time_value="10:00:00",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+            storage_place="関東商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 23), branch=BRANCH,
+        )
+        # 祝日→翌営業日=2/24(火) 起算、10時<15時 → +1営業日=2/25(水)
+        assert result == "2月25日配達予定"
+
+    def test_saturday_use_ship_rule(self):
+        """在庫+処理完了+土曜+受注先≠出荷先 → 月曜起算→出荷予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 21),  # 土
+            time_value="10:00:00",
+            customer_name="顧客A",
+            ship_to_name="出荷先B",
+            storage_place="関東商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 21), branch=BRANCH,
+        )
+        # 土→翌営業日=2/24(火) 起算、10時<15時 → 出荷日=2/24(火)
+        assert result == "2月24日出荷予定"
+
+    def test_saturday_other_branch(self):
+        """在庫+処理完了+土曜+他拠点 → 月曜起算→他拠点出荷予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 21),  # 土
+            time_value="10:00:00",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+            storage_place="関西商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 21), branch=BRANCH,
+        )
+        # 土→翌営業日=2/24(火) 起算、10時<15時 → 出荷日=2/24(火)
+        assert result == "2月24日他拠点より出荷予定"
+
+    def test_saturday_no_holiday(self):
+        """在庫+処理完了+土曜（祝日なし） → 月曜起算→火曜配達予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 14),  # 土
+            time_value="10:00:00",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+            storage_place="関東商品センター",
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, CacheStore(), holidays=holidays,
+            today=datetime.date(2026, 2, 14), branch=BRANCH,
+        )
+        # 土→翌営業日=2/16(月) 起算、10時<15時 → +1営業日=2/17(火)
+        assert result == "2月17日配達予定"
+
 
 # ============================================
 # calculate_delivery_date - 紐付き+処理完了

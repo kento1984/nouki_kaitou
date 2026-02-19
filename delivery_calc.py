@@ -512,6 +512,14 @@ def _check_stock_completed(
         return None
 
     hour, minute = time_parts
+
+    # 登録日が土日祝の場合は翌営業日を起算日にする
+    # （土曜に処理完了 → 月曜受注扱い → 火曜配達予定）
+    from nouki_kaitou.business_days import _is_weekend, is_holiday
+
+    if _is_weekend(reg_date) or is_holiday(reg_date, holidays):
+        reg_date = get_next_business_day(reg_date, holidays)
+
     _, cutoff, _ = get_branch_settings(branch, holidays, reg_date)
 
     # 他支店在庫チェック（受注先≠出荷先より優先）
