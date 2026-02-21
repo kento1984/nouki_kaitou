@@ -42,6 +42,8 @@ from nouki_kaitou.history import (
     CONFIRMING_SHEET_NAME,
     HISTORY_SHEET_NAME,
     clean_confirming_list,
+    clean_old_confirming_list,
+    clean_old_history,
     initialize_delivery_history,
     load_delivery_history,
     save_confirming_list,
@@ -53,7 +55,7 @@ from nouki_kaitou.report_generator import (
     create_delivery_report,
     create_delivery_report_by_order_numbers,
 )
-from nouki_kaitou.utils import get_output_folder
+from nouki_kaitou.utils import get_output_folder, is_file_open
 
 
 def _normalize(s: str) -> str:
@@ -512,6 +514,14 @@ def run(args: argparse.Namespace) -> None:
     history_path = history_found if history_found else tool_folder / "送付履歴.xlsx"
     history_exists = history_found is not None
 
+    # 送付履歴ファイルの排他チェック（他のプロセスで使用中なら中断）
+    if history_exists and is_file_open(str(history_path)):
+        print("エラー: 送付履歴ファイルが使用中です。")
+        print("  他の人が作業中のため実行できません。")
+        print(f"  ファイル: {history_path}")
+        print("  使用中の人に声をかけて閉じてもらってから再実行してください。")
+        sys.exit(1)
+
     if history_exists:
         # read_only=True で高速読み込み（書き込みは後で別途ロード）
         history_wb_ro = load_workbook(str(history_found), read_only=True)
@@ -711,6 +721,8 @@ def run(args: argparse.Namespace) -> None:
 
         if all_confirmed:
             save_delivery_history(ws_history, all_confirmed, execution_time, args.sender)
+            clean_old_history(ws_history, days_to_keep=180)
+            clean_old_confirming_list(ws_confirming, days_to_keep=180)
         if all_confirming:
             save_confirming_list(ws_confirming, all_confirming, execution_time, args.sender)
         if all_confirmed:
