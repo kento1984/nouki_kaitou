@@ -10,7 +10,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['numpy', 'lxml', 'PIL', 'Pillow', 'pythonwin', 'win32ui', 'mfc140u'],
     noarchive=False,
     optimize=0,
 )
