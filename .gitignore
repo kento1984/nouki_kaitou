@@ -34,6 +34,15 @@ __pycache__/
 *.spec
 !nouki_kaitou.spec
 
+# データファイル（ルートのマスター・実績等）
+/*.XLS
+/*.xls
+/*.xlsx
+/*.xlsm
+/*.bas
+/*.lnk
+/*.bat
+
 # OS
 Thumbs.db
 Desktop.ini
