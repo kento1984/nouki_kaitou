@@ -113,8 +113,12 @@ def _make_font(
     bold: bool = False,
     color: str = "000000",
     italic: bool = False,
+    underline: str | None = None,
 ) -> Font:
-    return Font(name=_FONT_NAME, size=size, bold=bold, color=color, italic=italic)
+    return Font(
+        name=_FONT_NAME, size=size, bold=bold, color=color,
+        italic=italic, underline=underline,
+    )
 
 
 # --- 頻出スタイルのキャッシュ（パフォーマンス最適化） ---
@@ -738,7 +742,9 @@ def _write_tracking_section(
 
         if direct and url:
             cell.value = _make_hyperlink_formula(url, text)
-            cell.font = _make_font(size=11, bold=True, color="0046B4")
+            cell.font = _make_font(
+                size=11, bold=True, color="0000FF", underline="single",
+            )
         else:
             cell.value = text
             cell.font = _make_font(size=11, bold=True, color=_HEADER_BG)
@@ -752,7 +758,9 @@ def _write_tracking_section(
             cell = ws.cell(row=row, column=1)
             link_text = "        → 追跡ページ（番号を入力してください）"
             cell.value = _make_hyperlink_formula(url, link_text)
-            cell.font = _make_font(size=10, color="0046B4")
+            cell.font = _make_font(
+                size=10, color="0000FF", underline="single",
+            )
             ws.row_dimensions[row].height = 20
             row += 1
 
