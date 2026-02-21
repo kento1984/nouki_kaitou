@@ -87,17 +87,26 @@ def _resolve_tool_folder(source_path: Path) -> Path:
     探索順:
         1. ソースファイルと同じフォルダ
         2. ソースファイルの親の親フォルダ（受注一覧/17PM.xls → ツールフォルダ）
-        3. nouki_kaitouパッケージの親フォルダ（≒プロジェクトルート）
+        3. exe化時: exeが置かれたフォルダ（sys.executable の親）
+           通常時: nouki_kaitouパッケージの親フォルダ（≒プロジェクトルート）
         4. カレントワーキングディレクトリ
 
     メーカー一覧.xlsxが最初に見つかったフォルダを返す。
     どこにもなければCWDを返す。
     """
     marker = "メーカー一覧.xlsx"
+
+    # 候補3: PyInstaller exe化時は __file__ が一時展開フォルダ(_MEIPASS)を
+    # 指すためマスターが見つからない。exe自体の場所を使う。
+    if getattr(sys, "frozen", False):
+        pkg_or_exe = Path(sys.executable).resolve().parent
+    else:
+        pkg_or_exe = Path(__file__).resolve().parent.parent
+
     candidates = [
         source_path.parent.resolve(),
         source_path.parent.parent.resolve(),
-        Path(__file__).resolve().parent.parent,
+        pkg_or_exe,
         Path(os.getcwd()).resolve(),
     ]
     # 重複除去（順序維持）
