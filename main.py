@@ -407,11 +407,12 @@ def _build_email_customers(cust_wb: object) -> set[str]:
     return email_customers
 
 
-def _show_gui(args: argparse.Namespace) -> dict | None:
+def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
     """GUI表示に必要なデータを読み込み、SelectionDialogを表示する。
 
     Returns:
-        ダイアログの結果dict、またはキャンセル時None
+        (ダイアログの結果dict or None, 読み込み済みデータdict)
+        キャンセル時でも読み込み済みデータは返す（呼び出し側で判定）。
     """
     source_path = Path(args.source)
     tool_folder = _resolve_tool_folder(source_path)
@@ -432,7 +433,7 @@ def _show_gui(args: argparse.Namespace) -> dict | None:
         print("処理対象の受注データがありません。")
         sys.exit(1)
 
-    # マスターファイル読み込み（GUI表示用）
+    # マスターファイル読み込み（GUI表示用 → run()でも再利用）
     mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
     mfg_wb = load_workbook(str(mfg_found), data_only=True) if mfg_found else None
 
@@ -456,53 +457,85 @@ def _show_gui(args: argparse.Namespace) -> dict | None:
     from nouki_kaitou.gui import SelectionDialog
 
     dialog = SelectionDialog(orders, branch, master_customers, email_customers)
-    return dialog.show()
+    gui_result = dialog.show()
+
+    # run()で再利用するためのデータ
+    preloaded = {
+        "source_data_raw": source_data_raw,
+        "cols": cols,
+        "orders": orders,
+        "mfg_wb": mfg_wb,
+        "cust_wb": cust_wb,
+        "tool_folder": tool_folder,
+        "branch": branch,
+    }
+    return gui_result, preloaded
 
 
-def run(args: argparse.Namespace) -> None:
-    """メイン処理を実行する。"""
+def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
+    """メイン処理を実行する。
+
+    Args:
+        args: コマンドライン引数
+        preloaded: _show_guiで読み込み済みのデータ（GUI経由時に重複読み込みを回避）
+    """
     execution_time = datetime.datetime.now()
+    t_run_start = time.perf_counter()
 
-    # --- 1. ソースファイル読み込み ---
+    # --- 1-3. ソースファイル・マスター読み込み ---
     source_path = Path(args.source)
     print(f"ソースファイル: {source_path}")
-    source_data_raw = load_source_file(str(source_path))
 
-    cols = get_column_positions(source_data_raw)
-    if cols is None:
-        print("エラー: ヘッダー行の列位置を検出できませんでした。")
-        print("10PM.XLSの形式を確認してください。")
-        sys.exit(1)
-
-    # --- 2. OrderRow変換 ---
-    orders: list[OrderRow] = []
-    for i in get_data_rows_range(source_data_raw, cols):
-        if is_data_row(source_data_raw, i, cols):
-            orders.append(parse_order_row(source_data_raw, i, cols))
-
-    print(f"受注データ: {len(orders)}件")
-
-    if not orders:
-        print("処理対象の受注データがありません。")
-        return
-
-    # --- 3. マスターファイル読み込み ---
-    tool_folder = _resolve_tool_folder(source_path)
-    print(f"ツールフォルダ: {tool_folder}")
-
-    mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
-    if mfg_found:
-        mfg_wb = load_workbook(str(mfg_found), data_only=True)
+    if preloaded is not None:
+        # GUI経由: _show_guiで読み込み済みのデータを再利用
+        source_data_raw = preloaded["source_data_raw"]
+        cols = preloaded["cols"]
+        orders = preloaded["orders"]
+        mfg_wb = preloaded["mfg_wb"]
+        cust_wb = preloaded["cust_wb"]
+        tool_folder = preloaded["tool_folder"]
+        branch = preloaded["branch"]
+        print(f"受注データ: {len(orders)}件（GUI読み込み済み）")
     else:
-        print(f"警告: メーカー一覧が見つかりません: {tool_folder}")
-        print("  祝日カレンダー・営業所設定・メーカーキャッシュなしで続行します。")
-        mfg_wb = None
+        # CLI経由: 自前で読み込む
+        source_data_raw = load_source_file(str(source_path))
 
-    cust_found = _find_file_in_dir(tool_folder, "顧客マスター_v2.xlsm")
-    if not cust_found:
-        print(f"エラー: 顧客マスターが見つかりません: {tool_folder}")
-        sys.exit(1)
-    cust_wb = load_workbook(str(cust_found), data_only=True)
+        cols = get_column_positions(source_data_raw)
+        if cols is None:
+            print("エラー: ヘッダー行の列位置を検出できませんでした。")
+            print("10PM.XLSの形式を確認してください。")
+            sys.exit(1)
+
+        orders = []
+        for i in get_data_rows_range(source_data_raw, cols):
+            if is_data_row(source_data_raw, i, cols):
+                orders.append(parse_order_row(source_data_raw, i, cols))
+
+        print(f"受注データ: {len(orders)}件")
+
+        if not orders:
+            print("処理対象の受注データがありません。")
+            return
+
+        tool_folder = _resolve_tool_folder(source_path)
+
+        mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
+        if mfg_found:
+            mfg_wb = load_workbook(str(mfg_found), data_only=True)
+        else:
+            print(f"警告: メーカー一覧が見つかりません: {tool_folder}")
+            print("  祝日カレンダー・営業所設定・メーカーキャッシュなしで続行します。")
+            mfg_wb = None
+
+        cust_found = _find_file_in_dir(tool_folder, "顧客マスター_v2.xlsm")
+        if not cust_found:
+            print(f"エラー: 顧客マスターが見つかりません: {tool_folder}")
+            sys.exit(1)
+        cust_wb = load_workbook(str(cust_found), data_only=True)
+
+        branch = load_branch_settings(mfg_wb, source_data_raw, cols) if mfg_wb is not None else BranchSettings()
+
+    print(f"ツールフォルダ: {tool_folder}")
 
     # 担当者マスターシート読み込み（シートが存在しない場合はNone → 担当者分割なし）
     try:
@@ -522,6 +555,7 @@ def run(args: argparse.Namespace) -> None:
         print("  使用中の人に声をかけて閉じてもらってから再実行してください。")
         sys.exit(1)
 
+    t_history_load = time.perf_counter()
     if history_exists:
         # read_only=True で高速読み込み（書き込みは後で別途ロード）
         history_wb_ro = load_workbook(str(history_found), read_only=True)
@@ -530,12 +564,14 @@ def run(args: argparse.Namespace) -> None:
         history_wb_ro = initialize_delivery_history(str(history_path))
 
     # --- 4. キャッシュ構築 ---
+    # confirming_wsを含めた完全なキャッシュを構築（GUI時はconfirming_ws=Noneだったため再構築）
     ws_confirming_ro = history_wb_ro[CONFIRMING_SHEET_NAME]
     cache = build_all_caches(mfg_wb, cust_wb, ws_confirming_ro, source_data_raw, cols)
     holidays = load_holidays(mfg_wb) if mfg_wb is not None else {}
-    branch = load_branch_settings(mfg_wb, source_data_raw, cols) if mfg_wb is not None else BranchSettings()
 
+    t_data_ready = time.perf_counter()
     print(f"営業所: {branch.name}")
+    print(f"データ読み込み: {t_data_ready - t_run_start:.2f}s（うち送付履歴: {t_data_ready - t_history_load:.2f}s）")
 
     # --- 5. 送付履歴読み込み（pickleキャッシュ付き） ---
     ws_history_ro = history_wb_ro[HISTORY_SHEET_NAME]
@@ -789,8 +825,9 @@ def main() -> None:
         sys.exit(1)
 
     # --- GUIモード判定: --customer未指定ならGUI表示 ---
+    preloaded = None
     if args.customer is None:
-        gui_result = _show_gui(args)
+        gui_result, preloaded = _show_gui(args)
         if gui_result is None:
             # キャンセル
             print("キャンセルされました。")
@@ -807,7 +844,7 @@ def main() -> None:
             args.order_numbers = gui_result["order_numbers"]
 
     try:
-        run(args)
+        run(args, preloaded=preloaded)
     except KeyboardInterrupt:
         print("\n中断しました。")
         sys.exit(1)
