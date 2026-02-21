@@ -48,6 +48,7 @@ from nouki_kaitou.history import (
     save_delivery_history,
 )
 from nouki_kaitou.models import BranchSettings, OrderRow, ReportResult
+from nouki_kaitou.representative import get_rep_list, is_split_by_rep
 from nouki_kaitou.report_generator import (
     create_delivery_report,
     create_delivery_report_by_order_numbers,
@@ -501,6 +502,12 @@ def run(args: argparse.Namespace) -> None:
         sys.exit(1)
     cust_wb = load_workbook(str(cust_found), data_only=True)
 
+    # 担当者マスターシート読み込み（シートが存在しない場合はNone → 担当者分割なし）
+    try:
+        rep_master_ws = cust_wb["担当者マスター"]
+    except KeyError:
+        rep_master_ws = None
+
     history_found = _find_file_in_dir(tool_folder, "送付履歴.xlsx")
     history_path = history_found if history_found else tool_folder / "送付履歴.xlsx"
     history_exists = history_found is not None
@@ -624,41 +631,55 @@ def run(args: argparse.Namespace) -> None:
     gen_start = time.perf_counter()
 
     for cust in customer_names:
-        if order_numbers_mode:
-            # 伝票番号指定モード
-            result = create_delivery_report_by_order_numbers(
-                source_data=orders_by_customer.get(cust, []),
-                customer_name=cust,
-                order_numbers=order_numbers_mode,
-                cache=cache,
-                output_dir=output_dir,
-                holidays=holidays,
-                branch=branch,
-                execution_time=execution_time,
-            )
+        # 担当者別分割判定
+        if rep_master_ws is not None and is_split_by_rep(cust, rep_master_ws):
+            rep_list = get_rep_list(cust, rep_master_ws)
+            # 登録担当者ごと + __OTHER__（未登録担当者用）
+            rep_names_to_process = rep_list + ["__OTHER__"]
         else:
-            # 期間指定モード
-            result = create_delivery_report(
-                source_data=orders_by_customer.get(cust, []),
-                customer_name=cust,
-                sent_orders=sent_orders,
-                cache=cache,
-                output_dir=output_dir,
-                holidays=holidays,
-                branch=branch,
-                execution_time=execution_time,
-                date_from=date_from,
-                date_to=date_to,
-            )
+            rep_names_to_process = [""]  # 分割なし
 
-        if result:
-            all_results.append(result)
-            confirmed_count = len(result.confirmed_orders)
-            confirming_count = len(result.confirming_orders)
-            print(f"  生成: {result.file_path}")
-            print(f"    確定: {confirmed_count}件 / 確認中: {confirming_count}件")
-        else:
-            print(f"  スキップ: {cust}（対象データなし）")
+        for rep_name in rep_names_to_process:
+            if order_numbers_mode:
+                # 伝票番号指定モード
+                result = create_delivery_report_by_order_numbers(
+                    source_data=orders_by_customer.get(cust, []),
+                    customer_name=cust,
+                    order_numbers=order_numbers_mode,
+                    cache=cache,
+                    output_dir=output_dir,
+                    holidays=holidays,
+                    branch=branch,
+                    execution_time=execution_time,
+                    rep_name=rep_name,
+                    rep_master_ws=rep_master_ws,
+                )
+            else:
+                # 期間指定モード
+                result = create_delivery_report(
+                    source_data=orders_by_customer.get(cust, []),
+                    customer_name=cust,
+                    sent_orders=sent_orders,
+                    cache=cache,
+                    output_dir=output_dir,
+                    holidays=holidays,
+                    branch=branch,
+                    execution_time=execution_time,
+                    date_from=date_from,
+                    date_to=date_to,
+                    rep_name=rep_name,
+                    rep_master_ws=rep_master_ws,
+                )
+
+            if result:
+                all_results.append(result)
+                confirmed_count = len(result.confirmed_orders)
+                confirming_count = len(result.confirming_orders)
+                print(f"  生成: {result.file_path}")
+                print(f"    確定: {confirmed_count}件 / 確認中: {confirming_count}件")
+            elif rep_name == "" or rep_name == rep_names_to_process[0]:
+                # 分割なし or 最初の担当者のみスキップ表示（__OTHER__等は静かにスキップ）
+                print(f"  スキップ: {cust}（対象データなし）")
 
     gen_elapsed = time.perf_counter() - gen_start
     print(f"\n回答書生成: {gen_elapsed:.2f}s")
@@ -714,6 +735,7 @@ def run(args: argparse.Namespace) -> None:
             created_files=created_files,
             branch=branch,
             customer_master_ws=cust_ws,
+            rep_master_ws=rep_master_ws,
             holidays=holidays,
             cache=cache,
             send_directly=(args.email_mode == "send"),
