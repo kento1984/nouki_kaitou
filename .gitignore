@@ -32,6 +32,7 @@ __pycache__/
 /build/
 /dist/
 *.spec
+!nouki_kaitou.spec
 
 # OS
 Thumbs.db
