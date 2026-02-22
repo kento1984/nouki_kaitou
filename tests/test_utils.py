@@ -10,6 +10,7 @@ from nouki_kaitou.utils import (
     convert_to_half_width,
     extract_date_from_string,
     format_date_japanese,
+    format_quantity,
     is_december_31,
     is_numeric_char,
     normalize_name_for_comparison,
@@ -298,3 +299,56 @@ class TestNormalizeNameForComparison:
     def test_fullwidth_alpha(self):
         """全角英字→半角英字"""
         assert normalize_name_for_comparison("ＫＧＫサービス") == "KGKサービス"
+
+
+# ============================================
+# FormatQuantity
+# ============================================
+class TestFormatQuantity:
+    def test_integer_with_decimals(self):
+        """1.00 → 1"""
+        assert format_quantity("1.00") == "1"
+
+    def test_integer_two(self):
+        """2.00 → 2"""
+        assert format_quantity("2.00") == "2"
+
+    def test_half_decimal(self):
+        """2.50 → 2.5"""
+        assert format_quantity("2.50") == "2.5"
+
+    def test_zero_half(self):
+        """0.50 → 0.5"""
+        assert format_quantity("0.50") == "0.5"
+
+    def test_already_integer(self):
+        """整数はそのまま"""
+        assert format_quantity("3") == "3"
+
+    def test_already_clean_decimal(self):
+        """余計なゼロがない小数はそのまま"""
+        assert format_quantity("1.5") == "1.5"
+
+    def test_empty_string(self):
+        """空文字列はそのまま"""
+        assert format_quantity("") == ""
+
+    def test_non_numeric(self):
+        """数値でない文字列はそのまま"""
+        assert format_quantity("abc") == "abc"
+
+    def test_large_number(self):
+        """大きな数"""
+        assert format_quantity("100.00") == "100"
+
+    def test_many_trailing_zeros(self):
+        """末尾ゼロが多い"""
+        assert format_quantity("3.10000") == "3.1"
+
+    def test_zero(self):
+        """ゼロ"""
+        assert format_quantity("0") == "0"
+
+    def test_zero_decimal(self):
+        """0.00"""
+        assert format_quantity("0.00") == "0"

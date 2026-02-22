@@ -355,3 +355,28 @@ def normalize_name_for_comparison(name: str) -> str:
     例: 受注先「（有）三橋機工」vs 出荷先「(有)三橋機工」
     """
     return name.strip().translate(_NORMALIZE_TABLE)
+
+
+def format_quantity(qty: str) -> str:
+    """数量文字列から末尾の不要なゼロを除去する。
+
+    SAPの数量は "1.00" のような小数表記で格納されているが、
+    表示上は整数なら "1"、小数なら "2.5" のように簡潔にする。
+
+    例: "1.00" → "1", "2.50" → "2.5", "0.50" → "0.5", "3" → "3"
+    """
+    s = str(qty).strip()
+    if not s:
+        return s
+    try:
+        # 数値としてパースし、不要なゼロを除去
+        # Decimal で正確に処理（float の丸め誤差を回避）
+        from decimal import Decimal, InvalidOperation
+        d = Decimal(s)
+        # normalize() で "1.00" → "1", "2.50" → "2.5" に変換
+        normalized = d.normalize()
+        # 指数表記になる場合（例: 1E+2）は固定小数点に戻す
+        return f"{normalized:f}" if normalized.as_tuple().exponent > 0 else str(normalized)
+    except (InvalidOperation, ValueError):
+        # 数値でなければそのまま返す
+        return s

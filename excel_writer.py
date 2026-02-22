@@ -768,7 +768,8 @@ def _write_tracking_section(
         # 商品表示
         ws.merge_cells(f"A{row}:G{row}")
         cell = ws.cell(row=row, column=1)
-        cell.value = f"        - {mfg}  {product}  x{qty}"
+        from nouki_kaitou.utils import format_quantity
+        cell.value = f"        - {mfg}  {product}  x{format_quantity(qty)}"
         cell.font = _make_font(size=10, bold=True, color="282828")
         ws.row_dimensions[row].height = 20
         row += 1
@@ -791,7 +792,8 @@ def _write_stockout_section(
     row += 1
 
     for item in stockout_info_list:
-        text = f"        - {item.manufacturer_name}  {item.product_name}  x{item.quantity}"
+        from nouki_kaitou.utils import format_quantity
+        text = f"        - {item.manufacturer_name}  {item.product_name}  x{format_quantity(item.quantity)}"
         if item.approx_delivery:
             text += f" → {item.approx_delivery}"
         else:
@@ -862,7 +864,8 @@ def _write_bunno_section(
         # 商品ヘッダー
         ws.merge_cells(f"A{row}:G{row}")
         cell = ws.cell(row=row, column=1)
-        cell.value = f"    ■ {mfg}  {product}  x{qty}"
+        from nouki_kaitou.utils import format_quantity
+        cell.value = f"    ■ {mfg}  {product}  x{format_quantity(qty)}"
         cell.font = _make_font(size=11, bold=True, color="00468C")
 
         # 左罫線（アクセント）
@@ -950,7 +953,8 @@ def _write_bunno_completed_section(
     for mfg, product, qty in bunno_completed_list:
         ws.merge_cells(f"A{row}:G{row}")
         cell = ws.cell(row=row, column=1)
-        cell.value = f"        ■ {mfg}  {product}  x{qty}"
+        from nouki_kaitou.utils import format_quantity
+        cell.value = f"        ■ {mfg}  {product}  x{format_quantity(qty)}"
         cell.font = _make_font(size=10, color="006432")
         ws.row_dimensions[row].height = 20
         row += 1

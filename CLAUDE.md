@@ -276,6 +276,10 @@
 - 分納+処理完了は「分納完了」で1回案内後、送付履歴に記録して次回スキップ
 - 紐付き+処理完了は1回回答後、送付履歴に記録して次回スキップ
 
+## ビルド
+
+- コード変更後は必ず `python -m PyInstaller nouki_kaitou.spec --clean --noconfirm` で再ビルドすること
+
 ## 既知の課題・TODO
 
 - `has_bunno_mitei`の重複呼び出し整理（report_generator.py）

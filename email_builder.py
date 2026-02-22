@@ -341,6 +341,7 @@ def _build_tracking_section(
 ) -> str:
     """送り状情報セクション"""
     from nouki_kaitou.tracking import can_direct_track, get_tracking_url
+    from nouki_kaitou.utils import format_quantity
 
     h = html_escape
     parts: list[str] = []
@@ -404,7 +405,7 @@ def _build_tracking_section(
         for product_key, _ in product_list:
             p = product_key.split("|")
             parts.append(
-                f"<div class='item'>・{h(p[0])}  {h(p[1])}  x{p[2]}</div>"
+                f"<div class='item'>・{h(p[0])}  {h(p[1])}  x{format_quantity(p[2])}</div>"
             )
 
         # 複数送り状の場合は注釈
@@ -442,9 +443,10 @@ def _build_stockout_section(
     )
 
     for item in stockout_info_list:
+        from nouki_kaitou.utils import format_quantity
         base_text = (
             f"・{h(item.manufacturer_name)}  {h(item.product_name)}"
-            f"  x{item.quantity}"
+            f"  x{format_quantity(item.quantity)}"
         )
 
         # 表示優先順位：アバウト納期 > 確定納期 > 入荷次第ご連絡
@@ -474,7 +476,7 @@ def _build_bunno_section(
     """分納情報セクション"""
     from nouki_kaitou.bunno import calculate_bunno_date, has_bunno_kakuninchu
     from nouki_kaitou.excel_writer import check_same_date_in_bunno
-    from nouki_kaitou.utils import to_circled_number
+    from nouki_kaitou.utils import format_quantity, to_circled_number
 
     h = html_escape
     parts: list[str] = []
@@ -522,7 +524,7 @@ def _build_bunno_section(
         # 商品ヘッダー
         parts.append(
             f"<div style='margin-left: 10px; font-weight: bold; "
-            f"color: #003366;'>・{h(mfg)} {h(product)} x{qty}</div>"
+            f"color: #003366;'>・{h(mfg)} {h(product)} x{format_quantity(qty)}</div>"
         )
 
         # 同じ日付チェック
@@ -594,6 +596,7 @@ def _build_bunno_completed_section(
     bunno_completed_list: list[tuple[str, str, str]],
 ) -> str:
     """分納完了通知セクション"""
+    from nouki_kaitou.utils import format_quantity
     h = html_escape
     parts: list[str] = []
 
@@ -613,7 +616,7 @@ def _build_bunno_completed_section(
     for mfg, product, qty in bunno_completed_list:
         parts.append(
             f"<div style='margin-left: 10px; font-weight: bold; "
-            f"color: #1b5e20;'>・{h(mfg)}  {h(product)}  x{qty}</div>"
+            f"color: #1b5e20;'>・{h(mfg)}  {h(product)}  x{format_quantity(qty)}</div>"
         )
 
     parts.append("</div>")
