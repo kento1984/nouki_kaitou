@@ -702,6 +702,14 @@ def _calc_normal(
             rosenbin_date = delivery_date
         return _result(rosenbin_date, "出荷済み", "出荷予定", today)
 
+    # 紐付き + 受注先≠出荷先 → 加算後に1営業日逆算して「出荷予定」
+    # （直送販売ではuse_ship_ruleが設定されないので直接比較する）
+    is_himozuki_diff = (
+        row.document_type == "【受注】直送販売"
+        and storage_place != "転送中（直送用）"
+        and not _is_same_customer(row.customer_name, row.ship_to_name)
+    )
+
     # 通常（自社便配達）
     delivery_days = get_customer_delivery_days(row.customer_name, cache)
 
@@ -710,6 +718,12 @@ def _calc_normal(
         adjusted = add_business_days(delivery_date, days_to_add, holidays)
         adjusted = get_next_delivery_day(adjusted, delivery_days, holidays)
         return _result(adjusted, "出荷済み", "出荷予定", today)
+
+    # 紐付き + 受注先≠出荷先 → 加算後に1営業日逆算して「出荷予定」
+    if is_himozuki_diff:
+        adjusted = add_business_days(delivery_date, days_to_add, holidays)
+        ship_date = get_previous_business_day(adjusted, holidays)
+        return _result(ship_date, "出荷済み", "出荷予定", today)
 
     # 曜日制限なし → +営業日 → 「配達予定」
     adjusted = add_business_days(delivery_date, days_to_add, holidays)

@@ -1057,6 +1057,42 @@ class TestNormalCalc:
         # 保管場所=転送中（キャッシュから）→ 出荷予定
         assert result == "3月10日出荷予定"
 
+    def test_himozuki_diff_ship_to(self):
+        """紐付き + 受注先≠出荷先 + 曜日制限なし → 出荷予定"""
+        row = _make_row(
+            document_type="【受注】直送販売",
+            order_delivery_date=datetime.date(2026, 3, 10),  # 火
+            storage_place="関東商品センター",
+            item_group_code="D01",
+            customer_name="顧客A",
+            ship_to_name="出荷先B",
+        )
+        cache = _make_cache(mfg_days={"D01": 2})
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, cache, holidays=holidays, today=TODAY, branch=BRANCH
+        )
+        # 紐付き+受注先≠出荷先: 3/10+2営業日=3/12(木) → 1営業日前=3/11(水)出荷予定
+        assert result == "3月11日出荷予定"
+
+    def test_himozuki_same_ship_to(self):
+        """紐付き + 受注先=出荷先 + 曜日制限なし → 配達予定（変更なし）"""
+        row = _make_row(
+            document_type="【受注】直送販売",
+            order_delivery_date=datetime.date(2026, 3, 10),  # 火
+            storage_place="関東商品センター",
+            item_group_code="D01",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+        )
+        cache = _make_cache(mfg_days={"D01": 2})
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, cache, holidays=holidays, today=TODAY, branch=BRANCH
+        )
+        # 紐付き+受注先=出荷先: 3/10+2営業日=3/12(木) → 配達予定
+        assert result == "3月12日配達予定"
+
 
 # ============================================
 # _is_same_customer（全角/半角正規化）

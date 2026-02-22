@@ -591,8 +591,9 @@ def _resolve_delivery_place(row: OrderRow, today: datetime.date) -> str:
     if pickup_date is not None:
         return "お引き取り"
 
-    # 受注先と同じ → 貴社
-    if delivery_place == row.customer_name.strip():
+    # 受注先と同じ → 貴社（全角/半角正規化して比較）
+    if (normalize_name_for_comparison(delivery_place)
+            == normalize_name_for_comparison(row.customer_name)):
         return "貴社"
 
     # 「様」がついていなければ付与

@@ -33,6 +33,7 @@ from nouki_kaitou.report_generator import (
     _is_excluded,
     _determine_flags,
     _classify_order,
+    _collect_stockout_info,
 )
 
 
@@ -228,6 +229,22 @@ class TestResolveDeliveryPlace:
         )
         assert _resolve_delivery_place(row, TODAY) == "お引き取り"
 
+    def test_same_fullwidth_halfwidth_parens(self):
+        """全角（有）vs 半角(有) → 正規化して「貴社」"""
+        row = _make_row(
+            customer_name="（有）三橋機工",
+            ship_to_name="(有)三橋機工",
+        )
+        assert _resolve_delivery_place(row, TODAY) == "貴社"
+
+    def test_same_fullwidth_halfwidth_kabu_space(self):
+        """全角（株）+全角スペース vs 半角(株)+半角スペース → 「貴社」"""
+        row = _make_row(
+            customer_name="テスト（株）\u3000本社",
+            ship_to_name="テスト(株) 本社",
+        )
+        assert _resolve_delivery_place(row, TODAY) == "貴社"
+
 
 # ============================================
 # _resolve_price
@@ -383,6 +400,50 @@ class TestDetermineFlags:
         )
         assert fd is True
 
+    def test_bunno_in_confirming_blocks_force_delivered(self):
+        """進行中の分納 → force_deliveredをブロック
+
+        確認中一覧に「分納」で残っていて、まだ処理完了でない場合、
+        force_deliveredはFalse（is_bunno_in_confirmingがブロック）。
+        ただし ship_status != 処理完了 なので、そもそも
+        force_delivered判定ブロックに入らない。
+        """
+        row = _make_row(
+            document_type="【受注】直送販売",
+            storage_place="転送中（直送用）",
+            ship_status="未処理",
+            order_number="100",
+            detail_number="10",
+        )
+        cache = _make_cache(
+            confirm={"100|10": ("未", "分納", None)}
+        )
+        fd, hm, bc = _determine_flags(row, cache, {}, "100|10", "")
+        assert fd is False
+        assert bc is False
+
+    def test_bunno_completed_resets_bunno_in_confirming(self):
+        """分納+処理完了 → is_bunno_completedでis_bunno_in_confirmingリセット
+
+        分納が処理完了になるとis_bunno_completedがTrueになり、
+        is_bunno_in_confirmingはFalseにリセットされる。
+        直送の場合force_deliveredもTrueになりうる。
+        """
+        row = _make_row(
+            document_type="【受注】直送販売",
+            storage_place="転送中（直送用）",
+            ship_status="処理完了",
+            order_number="100",
+            detail_number="10",
+        )
+        cache = _make_cache(
+            confirm={"100|10": ("未", "分納", None)}
+        )
+        fd, hm, bc = _determine_flags(row, cache, {}, "100|10", "")
+        assert bc is True
+        # is_bunno_in_confirmingがリセットされるためブロックされない
+        assert fd is True
+
 
 # ============================================
 # build_report_row
@@ -461,6 +522,52 @@ class TestBuildReportRow:
         )
         assert "欠品中" not in report.remarks
         assert "分納:" not in report.remarks
+
+    def test_stockout_scheduling(self):
+        """欠品中 + 日程調整中 → 欠品中"""
+        row = _make_row(
+            comment_detail="欠品中",
+            # 指定納期・受注納期ともに12/31 → 日程調整中になる
+            order_delivery_date=datetime.date(2026, 12, 31),
+            specified_delivery_date=datetime.date(2026, 12, 31),
+            document_type="【受注】在庫販売",
+        )
+        cache = _make_cache()
+        _, status = build_report_row(
+            row, cache, {}, BRANCH, EXEC_TIME, False, TODAY
+        )
+        assert status == "欠品中"
+
+    def test_stockout_with_confirmed_date_skip(self):
+        """欠品中 + 確認中一覧に確定日 → 欠品overrideスキップ"""
+        row = _make_row(
+            comment_detail="欠品中",
+            order_delivery_date=datetime.date(2026, 12, 31),
+            order_number="100",
+            detail_number="10",
+        )
+        # 確認中一覧に確定日が手入力されている
+        cache = _make_cache(
+            confirm={"100|10": ("未", "欠品中", datetime.date(2026, 3, 15))}
+        )
+        _, status = build_report_row(
+            row, cache, {}, BRANCH, EXEC_TIME, False, TODAY
+        )
+        # 欠品overrideスキップ → 確定日に基づく通常の納期計算
+        assert status != "欠品中"
+        assert "（欠品）" not in status
+
+    def test_bunno_partial_ship_status(self):
+        """一部処理済み + 分納 → 分納（未処理と同じ）"""
+        row = _make_row(
+            comment_detail="分納:50個 2/20,50個 未定",
+            ship_status="一部処理済み",
+        )
+        cache = _make_cache()
+        _, status = build_report_row(
+            row, cache, {}, BRANCH, EXEC_TIME, False, TODAY
+        )
+        assert status == "分納"
 
     def test_price_confirming(self):
         """単価=1 → 確認中"""
@@ -578,6 +685,78 @@ class TestClassifyOrder:
             confirmed, confirming,
         )
         assert len(confirming) == 1
+
+    def test_bunno_keep_in_confirming_with_mitei(self):
+        """既存分納(keep) + 未定あり → 確認中に留まる"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(ship_status="未処理")
+        # 前回「分納」で確認中一覧に残っている
+        cache = _make_cache(
+            confirm={"1000001|10": ("未", "分納", None)}
+        )
+        bunno = [BunnoEntry("50個", "2/20", ""), BunnoEntry("50個", "未定", "")]
+        _classify_order(
+            row, "分納", cache, bunno,
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirming) == 1
+        assert confirming[0].status == "分納"
+        assert len(confirmed) == 0
+
+    def test_bunno_keep_all_confirmed(self):
+        """既存分納(keep) + 全確定 → 送付履歴「分納完了」"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(ship_status="未処理")
+        # 前回「分納」で確認中一覧に残っている
+        cache = _make_cache(
+            confirm={"1000001|10": ("未", "分納", None)}
+        )
+        # 全エントリに日付あり → 全確定
+        bunno = [BunnoEntry("50個", "2/20", ""), BunnoEntry("50個", "2/25", "")]
+        _classify_order(
+            row, "分納", cache, bunno,
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirmed) == 1
+        assert confirmed[0].delivery_answer == "分納完了"
+        assert len(confirming) == 0
+
+    def test_stockout_partial_marker(self):
+        """「（欠品）」付記 → confirming_orders with status=欠品中"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row()
+        cache = _make_cache()
+        _classify_order(
+            row, "2月20日配達予定（欠品）", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirming) == 1
+        assert confirming[0].status == "欠品中"
+
+    def test_bunno_partial_ship_status(self):
+        """一部処理済み + 分納 → 未処理と同じ扱い（確認中に残す）"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(ship_status="一部処理済み")
+        cache = _make_cache(
+            confirm={"1000001|10": ("未", "分納", None)}
+        )
+        bunno = [BunnoEntry("50個", "2/20", ""), BunnoEntry("50個", "未定", "")]
+        _classify_order(
+            row, "分納", cache, bunno,
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        # 処理完了でないので確認中に残る
+        assert len(confirming) == 1
+        assert confirming[0].status == "分納"
+        assert len(confirmed) == 0
 
 
 # ============================================
@@ -934,3 +1113,163 @@ class TestIntegration:
         # 2行（同じ注番の2明細）
         assert ws.cell(row=7, column=12).value == "100"
         assert ws.cell(row=8, column=12).value == "100"
+
+
+# ============================================
+# _collect_stockout_info
+# ============================================
+class TestCollectStockoutInfo:
+    """欠品情報収集テスト"""
+
+    def test_normal_stockout(self):
+        """通常の欠品 → StockoutEntry収集"""
+        row = _make_row(
+            comment_detail="欠品中 3月上旬予定",
+            ship_status="未処理",
+        )
+        cache = _make_cache()
+        result: list[StockoutEntry] = []
+        _collect_stockout_info(row, cache, "欠品中", result)
+        assert len(result) == 1
+        assert result[0].approx_delivery == "3月上旬入荷予定"
+
+    def test_stockout_completed_excluded(self):
+        """欠品+処理完了 → 欠品解消で収集しない"""
+        row = _make_row(
+            comment_detail="欠品中 3月上旬予定",
+            ship_status="処理完了",
+        )
+        cache = _make_cache()
+        result: list[StockoutEntry] = []
+        _collect_stockout_info(row, cache, "納品済み", result)
+        assert len(result) == 0
+
+    def test_stockout_shipping_excluded(self):
+        """送料行の欠品 → 収集しない"""
+        row = _make_row(
+            comment_detail="欠品中",
+            product_name="送料",
+            ship_status="未処理",
+        )
+        cache = _make_cache()
+        result: list[StockoutEntry] = []
+        _collect_stockout_info(row, cache, "欠品中", result)
+        assert len(result) == 0
+
+    def test_stockout_with_bunno_excluded(self):
+        """欠品+分納併存 → 欠品セクション除外（分納セクションで表示）"""
+        row = _make_row(
+            comment_detail="欠品中 分納:50個 2/20,50個 未定",
+            ship_status="未処理",
+        )
+        cache = _make_cache()
+        result: list[StockoutEntry] = []
+        _collect_stockout_info(row, cache, "分納", result)
+        assert len(result) == 0
+
+    def test_no_stockout_marker(self):
+        """「欠品中」なし → 収集しない"""
+        row = _make_row(
+            comment_detail="通常コメント",
+            ship_status="未処理",
+        )
+        cache = _make_cache()
+        result: list[StockoutEntry] = []
+        _collect_stockout_info(row, cache, "確認中", result)
+        assert len(result) == 0
+
+
+# ============================================
+# 統合テスト: 分納・欠品ライフサイクル
+# ============================================
+class TestBunnoStockoutLifecycle:
+    """分納・欠品のライフサイクル統合テスト"""
+
+    def test_stockout_force_delivered(self, tmp_path):
+        """欠品+直送処理完了 → force_deliveredで「納品済み」"""
+        data = [
+            _make_row(
+                comment_detail="欠品中",
+                document_type="【受注】直送販売",
+                storage_place="転送中（直送用）",
+                ship_status="処理完了",
+                order_delivery_date=datetime.date(2026, 12, 31),
+            ),
+        ]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        assert result is not None
+        assert len(result.confirmed_orders) == 1
+        assert result.confirmed_orders[0].delivery_answer == "納品済み"
+        # 欠品情報は収集されない（処理完了なので）
+        assert len(result.stockout_info_list) == 0
+
+    def test_stockout_confirming_lifecycle(self, tmp_path):
+        """欠品 → 確認中一覧に「欠品中」で入る"""
+        data = [
+            _make_row(
+                comment_detail="欠品中 3月上旬予定",
+                order_delivery_date=datetime.date(2026, 12, 31),
+                document_type="【受注】直送販売",
+                storage_place="転送中（直送用）",
+            ),
+        ]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        assert result is not None
+        assert len(result.confirming_orders) == 1
+        assert result.confirming_orders[0].status == "欠品中"
+        assert len(result.stockout_info_list) == 1
+
+    def test_bunno_with_mitei_lifecycle(self, tmp_path):
+        """分納（未定あり） → 確認中一覧に「分納」+ 分納情報収集"""
+        data = [
+            _make_row(
+                comment_detail="分納:50個 2/20,50個 未定",
+                ship_status="未処理",
+                order_delivery_date=datetime.date(2026, 2, 20),
+                document_type="【受注】直送販売",
+                storage_place="転送中（直送用）",
+            ),
+        ]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        assert result is not None
+        assert len(result.confirming_orders) == 1
+        assert result.confirming_orders[0].status == "分納"
+        assert len(result.bunno_info_list) == 1
+
+    def test_bunno_partial_ship_lifecycle(self, tmp_path):
+        """一部処理済み + 分納 → 未処理と同じ扱い"""
+        data = [
+            _make_row(
+                comment_detail="分納:50個 2/10,50個 未定",
+                ship_status="一部処理済み",
+                order_delivery_date=datetime.date(2026, 2, 20),
+                document_type="【受注】直送販売",
+                storage_place="転送中（直送用）",
+            ),
+        ]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        assert result is not None
+        # 一部処理済みでも分納なら確認中に残る
+        assert len(result.confirming_orders) == 1
+        assert result.confirming_orders[0].status == "分納"
+        assert len(result.bunno_info_list) == 1
