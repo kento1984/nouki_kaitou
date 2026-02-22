@@ -914,6 +914,15 @@ class TestColorConfirmingList:
         color_confirming_list(ws, today=today)
         assert ws.cell(row=2, column=1).fill.start_color.rgb == "00C8FFD4"
 
+    def test_partial_without_mi(self):
+        """一部処理済（みなし） → 薄緑"""
+        today = datetime.date(2026, 2, 16)
+        wb, ws = self._make_ws([
+            (datetime.date(2026, 2, 15), "一部処理済"),
+        ])
+        color_confirming_list(ws, today=today)
+        assert ws.cell(row=2, column=1).fill.start_color.rgb == "00C8FFD4"
+
     def test_week_old(self):
         """1週間以上経過 → オレンジ"""
         today = datetime.date(2026, 2, 16)

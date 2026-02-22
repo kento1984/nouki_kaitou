@@ -1007,7 +1007,7 @@ def color_confirming_list(
 
         if status_val == "出荷完了":
             fill = _make_fill(_CONFIRM_SHIP_DONE[0])
-        elif status_val == "一部処理済み":
+        elif status_val in ("一部処理済み", "一部処理済"):
             fill = _make_fill(_CONFIRM_PARTIAL[0])
         elif status_val == "欠品中":
             fill = _make_fill(_CONFIRM_STOCKOUT[0])
