@@ -16,10 +16,12 @@ from nouki_kaitou.history import (
     clean_confirming_list,
     clean_old_confirming_list,
     clean_old_history,
+    extract_sheet_rows,
     initialize_delivery_history,
     load_delivery_history,
     save_confirming_list,
     save_delivery_history,
+    save_history_batch,
 )
 from nouki_kaitou.models import (
     CacheStore,
@@ -946,6 +948,414 @@ class TestIntegration:
             assert "12345|10" in history_keys
             assert "99999|20" in history_keys
 
+            wb.close()
+        finally:
+            os.unlink(path)
+
+
+# ============================================
+# ExtractSheetRows
+# ============================================
+class TestExtractSheetRows:
+    def test_basic_read(self):
+        """正常なデータ行を読み出す"""
+        wb, ws = _make_history_ws()
+        _add_history_row(
+            ws, 2,
+            sent_dt=datetime.datetime(2026, 2, 15, 10, 0),
+            order_date=datetime.date(2026, 2, 10),
+            customer="テスト顧客",
+            order_num="12345",
+            detail="10",
+            mfg="メーカーA",
+            product="製品A",
+            delivery="2/17出荷予定",
+        )
+        _add_history_row(
+            ws, 3,
+            sent_dt=datetime.datetime(2026, 2, 14, 10, 0),
+            order_date=datetime.date(2026, 2, 9),
+            customer="顧客B",
+            order_num="67890",
+            detail="20",
+            mfg="メーカーB",
+            product="製品B",
+            delivery="納品済み",
+        )
+
+        rows = extract_sheet_rows(ws, 9)
+        assert len(rows) == 2
+        assert rows[0][3] == "12345"
+        assert rows[1][3] == "67890"
+
+    def test_empty_sheet(self):
+        """空シートでは空リスト"""
+        wb, ws = _make_history_ws()
+        rows = extract_sheet_rows(ws, 9)
+        assert rows == []
+
+    def test_skip_empty_order_number(self):
+        """受発注伝票が空の行はスキップ"""
+        wb, ws = _make_history_ws()
+        # 正常な行
+        _add_history_row(
+            ws, 2,
+            sent_dt=datetime.datetime(2026, 2, 15, 10, 0),
+            order_date=datetime.date(2026, 2, 10),
+            customer="テスト顧客",
+            order_num="12345",
+            detail="10",
+            mfg="メーカーA",
+            product="製品A",
+            delivery="回答",
+        )
+        # 受発注伝票が空の行
+        ws.cell(row=3, column=1).value = datetime.datetime(2026, 2, 14, 10, 0)
+        ws.cell(row=3, column=3).value = "顧客X"
+        # column 4 (受発注伝票) は空
+
+        rows = extract_sheet_rows(ws, 9)
+        assert len(rows) == 1
+
+    def test_read_only_workbook(self):
+        """read_only=True のワークブックで正常動作"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            wb = initialize_delivery_history(path)
+            ws = wb[HISTORY_SHEET_NAME]
+            _add_history_row(
+                ws, 2,
+                sent_dt=datetime.datetime(2026, 2, 15, 10, 0),
+                order_date=datetime.date(2026, 2, 10),
+                customer="テスト顧客",
+                order_num="12345",
+                detail="10",
+                mfg="メーカーA",
+                product="製品A",
+                delivery="回答",
+            )
+            wb.save(path)
+            wb.close()
+
+            # read_only=True で読み込み
+            wb_ro = load_workbook(path, read_only=True)
+            ws_ro = wb_ro[HISTORY_SHEET_NAME]
+            rows = extract_sheet_rows(ws_ro, 9)
+            assert len(rows) == 1
+            assert str(rows[0][3]).strip() == "12345"
+            wb_ro.close()
+        finally:
+            os.unlink(path)
+
+
+# ============================================
+# SaveHistoryBatch
+# ============================================
+class TestSaveHistoryBatch:
+    def test_basic_save(self):
+        """基本的なバッチ保存 → テーブル・ヘッダー・データが正しい"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            confirmed = [
+                HistoryRecord(
+                    order_date=datetime.date(2026, 2, 10),
+                    customer_name="テスト顧客",
+                    order_number="12345",
+                    detail_number="10",
+                    manufacturer_name="メーカーA",
+                    product_name="製品A",
+                    delivery_answer="2/17出荷予定",
+                    sender="テスト送付者",
+                ),
+            ]
+            confirming = [
+                ConfirmingRecord(
+                    order_date=datetime.date(2026, 2, 12),
+                    customer_name="テスト顧客",
+                    order_number="99999",
+                    detail_number="20",
+                    manufacturer_name="メーカーB",
+                    product_name="製品B",
+                    status="確認中",
+                ),
+            ]
+
+            save_history_batch(
+                path, [], [], confirmed, confirming,
+                exec_time, "送付者", today=today,
+            )
+
+            # 検証
+            wb = load_workbook(path)
+
+            # 送付履歴シート
+            ws_h = wb[HISTORY_SHEET_NAME]
+            assert ws_h.cell(row=1, column=1).value == "送付日時"
+            assert ws_h.cell(row=2, column=4).value == "12345"
+            assert ws_h.cell(row=2, column=8).value == "2/17出荷予定"
+            assert ws_h.cell(row=2, column=9).value == "送付者"
+            assert len(ws_h.tables) == 1
+
+            # 確認中一覧シート
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=1, column=1).value == "送付日時"
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=2, column=8).value == "未"  # デフォルト問合せ状況
+            assert ws_c.cell(row=2, column=9).value == "確認中"
+            assert len(ws_c.tables) == 1
+
+            # 入力規則
+            assert len(ws_c.data_validations.dataValidation) > 0
+
+            # 表示形式
+            assert ws_h.cell(row=2, column=1).number_format == "mm/dd hh:mm"
+            assert ws_h.cell(row=2, column=2).number_format == "mm/dd"
+
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_dedup_and_delivered_update(self):
+        """重複チェック: 既存データに同じキーがあれば納品済み更新のみ"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            # 既存の送付履歴データ
+            existing_history = [
+                [
+                    datetime.datetime(2026, 2, 15, 10, 0),
+                    datetime.date(2026, 2, 10),
+                    "テスト顧客", "12345", 10,
+                    "メーカーA", "製品A", "2/17出荷予定", "test",
+                ],
+            ]
+
+            # 同じキーで「納品済み」→ 既存行を更新
+            confirmed = [
+                HistoryRecord(
+                    order_number="12345",
+                    detail_number="10",
+                    delivery_answer="納品済み",
+                ),
+            ]
+
+            save_history_batch(
+                path, existing_history, [], confirmed, [],
+                exec_time, today=today,
+            )
+
+            wb = load_workbook(path)
+            ws_h = wb[HISTORY_SHEET_NAME]
+            assert ws_h.cell(row=2, column=4).value == "12345"
+            assert ws_h.cell(row=2, column=8).value == "納品済み"
+            # 重複なので2行にはならない
+            assert ws_h.cell(row=3, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_confirming_to_history_move(self):
+        """確認中一覧から送付履歴への移動"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            # 既存の確認中一覧
+            existing_confirming = [
+                [
+                    datetime.datetime(2026, 2, 15, 10, 0),
+                    datetime.date(2026, 2, 10),
+                    "テスト顧客", "12345", 10,
+                    "メーカーA", "製品A", "未", "確認中", None, "test",
+                ],
+                [
+                    datetime.datetime(2026, 2, 15, 10, 0),
+                    datetime.date(2026, 2, 10),
+                    "テスト顧客", "99999", 20,
+                    "メーカーB", "製品B", "未", "欠品中", None, "test",
+                ],
+            ]
+
+            # 12345が確定
+            confirmed = [
+                HistoryRecord(
+                    order_number="12345",
+                    detail_number="10",
+                    delivery_answer="2/17出荷予定",
+                    customer_name="テスト顧客",
+                ),
+            ]
+
+            save_history_batch(
+                path, [], existing_confirming, confirmed, [],
+                exec_time, today=today,
+            )
+
+            wb = load_workbook(path)
+
+            # 送付履歴に12345が移動
+            ws_h = wb[HISTORY_SHEET_NAME]
+            assert ws_h.cell(row=2, column=4).value == "12345"
+
+            # 確認中一覧には99999だけ残る
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=3, column=4).value is None
+
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_old_records_removed(self):
+        """古いレコードが除去される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            # 200日前のレコード（削除対象）
+            old_history = [
+                [
+                    datetime.datetime(2025, 7, 31, 10, 0),
+                    datetime.date(2025, 7, 25),
+                    "顧客A", "11111", 10,
+                    "メーカー", "製品", "回答", "test",
+                ],
+            ]
+            # 昨日のレコード（残る）
+            new_history = [
+                [
+                    datetime.datetime(2026, 2, 15, 10, 0),
+                    datetime.date(2026, 2, 10),
+                    "顧客B", "22222", 20,
+                    "メーカー", "製品", "回答", "test",
+                ],
+            ]
+
+            save_history_batch(
+                path, old_history + new_history, [], [], [],
+                exec_time, today=today,
+            )
+
+            wb = load_workbook(path)
+            ws_h = wb[HISTORY_SHEET_NAME]
+            # 古いレコードは削除され、新しいレコードだけ残る
+            assert ws_h.cell(row=2, column=4).value == "22222"
+            assert ws_h.cell(row=3, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_sort_descending(self):
+        """送付日時の降順でソートされる"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            existing_history = [
+                [
+                    datetime.datetime(2026, 2, 14, 10, 0),
+                    datetime.date(2026, 2, 10),
+                    "顧客A", "11111", 10,
+                    "メーカー", "製品", "古い", "test",
+                ],
+            ]
+
+            confirmed = [
+                HistoryRecord(
+                    order_date=datetime.date(2026, 2, 15),
+                    customer_name="顧客B",
+                    order_number="22222",
+                    detail_number="10",
+                    delivery_answer="新しい",
+                ),
+            ]
+
+            save_history_batch(
+                path, existing_history, [], confirmed, [],
+                exec_time, today=today,
+            )
+
+            wb = load_workbook(path)
+            ws_h = wb[HISTORY_SHEET_NAME]
+            # 新しいレコード（exec_time=2/16）が先頭
+            assert ws_h.cell(row=2, column=4).value == "22222"
+            assert ws_h.cell(row=3, column=4).value == "11111"
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_confirming_status_update(self):
+        """確認中一覧の重複時はステータスのみ更新"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            existing_confirming = [
+                [
+                    datetime.datetime(2026, 2, 15, 10, 0),
+                    datetime.date(2026, 2, 10),
+                    "テスト顧客", "12345", 10,
+                    "メーカーA", "製品A", "済", "旧ステータス", None, "test",
+                ],
+            ]
+
+            new_confirming = [
+                ConfirmingRecord(
+                    order_number="12345",
+                    detail_number="10",
+                    status="新ステータス",
+                ),
+            ]
+
+            save_history_batch(
+                path, [], existing_confirming, [], new_confirming,
+                exec_time, today=today,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=9).value == "新ステータス"
+            # 問合せ状況は元のまま
+            assert ws_c.cell(row=2, column=8).value == "済"
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_empty_input(self):
+        """全て空でもファイルが正常に生成される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 2, 16, 10, 0)
+            today = datetime.date(2026, 2, 16)
+
+            save_history_batch(
+                path, [], [], [], [],
+                exec_time, today=today,
+            )
+
+            wb = load_workbook(path)
+            assert HISTORY_SHEET_NAME in wb.sheetnames
+            assert CONFIRMING_SHEET_NAME in wb.sheetnames
+            ws_h = wb[HISTORY_SHEET_NAME]
+            assert ws_h.cell(row=1, column=1).value == "送付日時"
+            assert ws_h.cell(row=2, column=1).value is None
             wb.close()
         finally:
             os.unlink(path)

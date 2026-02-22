@@ -73,6 +73,7 @@ _COLOR_DEFAULT = ("FAF5DC", "505050")            # デフォルト
 
 # 確認中一覧の色
 _CONFIRM_SHIP_DONE = ("FFB4B4", None)    # 出荷完了
+_CONFIRM_PARTIAL = ("C8FFD4", None)      # 一部処理済み
 _CONFIRM_STOCKOUT = ("DCC8FF", None)     # 欠品中
 _CONFIRM_BUNNO = ("C8DCFF", None)        # 分納
 _CONFIRM_WEEK_OLD = ("FFC896", None)     # 1週間以上
@@ -1002,6 +1003,8 @@ def color_confirming_list(
 
         if status_val == "出荷完了":
             fill = _make_fill(_CONFIRM_SHIP_DONE[0])
+        elif status_val == "一部処理済み":
+            fill = _make_fill(_CONFIRM_PARTIAL[0])
         elif status_val == "欠品中":
             fill = _make_fill(_CONFIRM_STOCKOUT[0])
         elif status_val == "分納":

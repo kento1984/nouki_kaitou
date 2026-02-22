@@ -41,13 +41,10 @@ from nouki_kaitou.email_builder import create_emails
 from nouki_kaitou.history import (
     CONFIRMING_SHEET_NAME,
     HISTORY_SHEET_NAME,
-    clean_confirming_list,
-    clean_old_confirming_list,
-    clean_old_history,
+    extract_sheet_rows,
     initialize_delivery_history,
     load_delivery_history,
-    save_confirming_list,
-    save_delivery_history,
+    save_history_batch,
 )
 from nouki_kaitou.models import BranchSettings, OrderRow, ReportResult
 from nouki_kaitou.representative import get_rep_list, is_split_by_rep
@@ -582,6 +579,10 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
     history_elapsed = time.perf_counter() - t0
     print(f"送付済み伝票: {len(sent_orders)}件 ({history_elapsed:.2f}s)")
 
+    # 送付履歴の行データをメモリに保持（後のバッチ書き込みで使用）
+    history_rows = extract_sheet_rows(ws_history_ro, 9)
+    confirming_rows = extract_sheet_rows(ws_confirming_ro, 11)
+
     # read_onlyワークブックを閉じる
     if history_exists:
         history_wb_ro.close()
@@ -748,23 +749,11 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
     has_updates = bool(all_confirmed or all_confirming)
     if has_updates:
         t_save = time.perf_counter()
-        if history_exists:
-            history_wb = load_workbook(str(history_path))
-        else:
-            history_wb = initialize_delivery_history(str(history_path))
-        ws_history = history_wb[HISTORY_SHEET_NAME]
-        ws_confirming = history_wb[CONFIRMING_SHEET_NAME]
-
-        if all_confirmed:
-            save_delivery_history(ws_history, all_confirmed, execution_time, args.sender)
-            clean_old_history(ws_history, days_to_keep=180)
-            clean_old_confirming_list(ws_confirming, days_to_keep=180)
-        if all_confirming:
-            save_confirming_list(ws_confirming, all_confirming, execution_time, args.sender)
-        if all_confirmed:
-            clean_confirming_list(ws_history, ws_confirming, all_confirmed, execution_time, args.sender)
-
-        history_wb.save(str(history_path))
+        save_history_batch(
+            str(history_path), history_rows, confirming_rows,
+            all_confirmed, all_confirming,
+            execution_time, args.sender,
+        )
         save_elapsed = time.perf_counter() - t_save
         print(f"送付履歴保存: {history_path} ({save_elapsed:.2f}s)")
     else:

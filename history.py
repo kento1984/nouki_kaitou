@@ -653,3 +653,293 @@ def _clean_old_records(
         _write_rows_to_sheet(ws, keep_rows, col_count)
 
     return deleted_count
+
+
+# ============================================
+# 高速バッチ処理（read_only=True → インメモリ → 新規Workbook書き出し）
+# ============================================
+def extract_sheet_rows(ws, col_count: int) -> list[list]:
+    """read_only=True のワークシートからデータ行をメモリに読み出す。
+
+    Args:
+        ws: read_only=True で開いたワークシート
+        col_count: 読み取る列数
+
+    Returns:
+        各行のリスト（ヘッダー行は除く、受発注伝票が空の行はスキップ）
+    """
+    rows: list[list] = []
+    for row_data in ws.iter_rows(min_row=2, max_col=col_count, values_only=True):
+        if not row_data:
+            continue
+        # 受発注伝票（4列目=index 3）が空の行はスキップ
+        order_num = row_data[3] if len(row_data) > 3 else None
+        if order_num is None or str(order_num).strip() == "":
+            continue
+        rows.append(list(row_data))
+    return rows
+
+
+def save_history_batch(
+    file_path: str,
+    history_rows: list[list],
+    confirming_rows: list[list],
+    new_confirmed: list[HistoryRecord],
+    new_confirming: list[ConfirmingRecord],
+    execution_time: datetime.datetime,
+    sender: str = "",
+    days_to_keep: int = 180,
+    today: datetime.date | None = None,
+) -> None:
+    """送付履歴ファイルの全更新を1回のバッチで実行する。
+
+    read_only=True で読み込んだ行データをインメモリで処理し、
+    新規Workbookに書き出す。load_workbook(read_only=False) を使わないため高速。
+
+    Args:
+        file_path: 送付履歴.xlsx のパス
+        history_rows: 既存の送付履歴データ（extract_sheet_rowsで読み込み済み）
+        confirming_rows: 既存の確認中一覧データ（同上）
+        new_confirmed: 新規確定伝票
+        new_confirming: 新規確認中伝票
+        execution_time: 実行時刻
+        sender: 送付者名
+        days_to_keep: 保持日数（デフォルト180日）
+        today: 基準日（テスト用）
+    """
+    if today is None:
+        today = datetime.date.today()
+
+    default_sender = sender or _get_default_sender()
+
+    # 作業用コピー（元データを破壊しない）
+    conf_rows = [row[:] for row in confirming_rows]
+    hist_rows = [row[:] for row in history_rows]
+
+    # --- ステップ1: 確認中一覧から確定キーを除去 → moved_orders作成 ---
+    confirmed_keys: dict[str, HistoryRecord] = {}
+    for record in new_confirmed:
+        key = f"{record.order_number}|{record.detail_number}"
+        confirmed_keys[key] = record
+
+    moved_orders: list[HistoryRecord] = []
+    if confirmed_keys:
+        keep_conf: list[list] = []
+        for row in conf_rows:
+            order_num = str(row[3] or "").strip()
+            detail_num = str(row[4] or "").strip()
+            conf_key = f"{order_num}|{detail_num}"
+            if conf_key in confirmed_keys:
+                moved_orders.append(confirmed_keys[conf_key])
+            else:
+                keep_conf.append(row)
+        conf_rows = keep_conf
+
+    # --- ステップ2: 確認中一覧に new_confirming を追加（重複時はステータス更新） ---
+    if new_confirming:
+        existing_conf_keys: dict[str, int] = {}
+        for i, row in enumerate(conf_rows):
+            order_num = str(row[3] or "").strip()
+            detail_num = str(row[4] or "").strip()
+            if order_num:
+                key = f"{order_num}|{detail_num}"
+                if key not in existing_conf_keys:
+                    existing_conf_keys[key] = i
+
+        new_conf_items: list[list] = []
+        for record in new_confirming:
+            key = f"{record.order_number}|{record.detail_number}"
+            record_sender = sender or record.sender or default_sender
+
+            if key in existing_conf_keys:
+                # 重複：ステータス（9列目=index 8）を更新
+                idx = existing_conf_keys[key]
+                if idx >= 0:
+                    conf_rows[idx][8] = record.status
+            else:
+                new_row = [
+                    execution_time,
+                    record.order_date,
+                    record.customer_name,
+                    record.order_number,
+                    _to_int_detail(record.detail_number),
+                    record.manufacturer_name,
+                    record.product_name,
+                    record.inquiry_status,  # 問合せ状況（デフォルト「未」）
+                    record.status,           # ステータス
+                    None,                    # 受注納期（ユーザー手入力欄。常に空で書き込む）
+                    record_sender,
+                ]
+                new_conf_items.append(new_row)
+                existing_conf_keys[key] = -1
+
+        conf_rows = new_conf_items + conf_rows
+
+    # --- ステップ3: 確認中一覧の古いレコードを除去 ---
+    cutoff_date = today - datetime.timedelta(days=days_to_keep)
+    conf_rows = _filter_old_rows(conf_rows, cutoff_date)
+
+    # --- ステップ4: 確認中一覧をソート（送付日時降順） ---
+    conf_rows.sort(
+        key=lambda r: r[0] if isinstance(r[0], datetime.datetime) else datetime.datetime.min,
+        reverse=True,
+    )
+
+    # --- ステップ5: 送付履歴に new_confirmed + moved_orders を追加 ---
+    all_new_history = list(new_confirmed) + moved_orders
+    if all_new_history:
+        existing_hist_keys: dict[str, int] = {}
+        for i, row in enumerate(hist_rows):
+            order_num = str(row[3] or "").strip()
+            detail_num = str(row[4] or "").strip()
+            if order_num:
+                key = f"{order_num}|{detail_num}"
+                if key not in existing_hist_keys:
+                    existing_hist_keys[key] = i
+
+        new_hist_items: list[list] = []
+        for record in all_new_history:
+            key = f"{record.order_number}|{record.detail_number}"
+            record_sender = sender or record.sender or default_sender
+
+            if key in existing_hist_keys:
+                # 重複：納品済みの場合は既存行の納期回答を更新
+                if record.delivery_answer == "納品済み":
+                    idx = existing_hist_keys[key]
+                    hist_rows[idx][7] = "納品済み"
+            else:
+                new_row = [
+                    execution_time,
+                    record.order_date,
+                    record.customer_name,
+                    record.order_number,
+                    _to_int_detail(record.detail_number),
+                    record.manufacturer_name,
+                    record.product_name,
+                    record.delivery_answer,
+                    record_sender,
+                ]
+                new_hist_items.append(new_row)
+                existing_hist_keys[key] = -1
+
+        hist_rows = new_hist_items + hist_rows
+
+    # --- ステップ6: 送付履歴の古いレコードを除去 ---
+    hist_rows = _filter_old_rows(hist_rows, cutoff_date)
+
+    # --- ステップ7: 送付履歴をソート（送付日時降順） ---
+    hist_rows.sort(
+        key=lambda r: r[0] if isinstance(r[0], datetime.datetime) else datetime.datetime.min,
+        reverse=True,
+    )
+
+    # --- ステップ8: 新規Workbook書き出し ---
+    _write_history_workbook(file_path, hist_rows, conf_rows, today)
+
+
+def _filter_old_rows(rows: list[list], cutoff_date: datetime.date) -> list[list]:
+    """cutoff_date より古い行を除外する。日付不明は残す。"""
+    keep: list[list] = []
+    for row in rows:
+        sent_date = _parse_date_value(row[0]) if row else None
+        if sent_date is None or sent_date >= cutoff_date:
+            keep.append(row)
+    return keep
+
+
+def _write_history_workbook(
+    file_path: str,
+    history_rows: list[list],
+    confirming_rows: list[list],
+    today: datetime.date | None = None,
+) -> None:
+    """送付履歴Workbookを新規作成し、データを書き出す。
+
+    initialize_delivery_history と同じ構造（テーブル・列幅・表示形式・入力規則）で
+    新規Workbookを作成し、インメモリの行データを書き込んで保存する。
+
+    Args:
+        file_path: 保存先ファイルパス
+        history_rows: 送付履歴のデータ行
+        confirming_rows: 確認中一覧のデータ行
+        today: 基準日（色分け用）
+    """
+    from nouki_kaitou.excel_writer import color_confirming_list
+
+    wb = Workbook()
+
+    # === 送付履歴シート ===
+    ws_history = wb.active
+    ws_history.title = HISTORY_SHEET_NAME
+
+    # ヘッダー
+    for col_idx, header in enumerate(_HISTORY_HEADERS, 1):
+        ws_history.cell(row=1, column=col_idx).value = header
+
+    # 列幅
+    for col_idx, width in enumerate(_HISTORY_WIDTHS, 1):
+        ws_history.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # データ書き込み
+    for row_idx, row_data in enumerate(history_rows, 2):
+        for col_idx, value in enumerate(row_data, 1):
+            if col_idx <= len(_HISTORY_HEADERS):
+                ws_history.cell(row=row_idx, column=col_idx).value = value
+
+    # テーブル設定
+    hist_last_row = max(len(history_rows) + 1, 1)
+    tbl_history = Table(
+        displayName=_HISTORY_TABLE_NAME,
+        ref=f"A1:I{hist_last_row}",
+    )
+    tbl_history.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2", showRowStripes=True
+    )
+    ws_history.add_table(tbl_history)
+
+    # 表示形式
+    for row_idx in range(2, len(history_rows) + 2):
+        ws_history.cell(row=row_idx, column=1).number_format = "mm/dd hh:mm"
+        ws_history.cell(row=row_idx, column=2).number_format = "mm/dd"
+
+    # === 確認中一覧シート ===
+    ws_confirming = wb.create_sheet(CONFIRMING_SHEET_NAME)
+
+    # ヘッダー
+    for col_idx, header in enumerate(_CONFIRMING_HEADERS, 1):
+        ws_confirming.cell(row=1, column=col_idx).value = header
+
+    # 列幅
+    for col_idx, width in enumerate(_CONFIRMING_WIDTHS, 1):
+        ws_confirming.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # データ書き込み
+    for row_idx, row_data in enumerate(confirming_rows, 2):
+        for col_idx, value in enumerate(row_data, 1):
+            if col_idx <= len(_CONFIRMING_HEADERS):
+                ws_confirming.cell(row=row_idx, column=col_idx).value = value
+
+    # テーブル設定
+    conf_last_row = max(len(confirming_rows) + 1, 1)
+    tbl_confirming = Table(
+        displayName=_CONFIRMING_TABLE_NAME,
+        ref=f"A1:K{conf_last_row}",
+    )
+    tbl_confirming.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium1", showRowStripes=True
+    )
+    ws_confirming.add_table(tbl_confirming)
+
+    # 入力規則
+    if confirming_rows:
+        _set_inquiry_validation(ws_confirming, len(confirming_rows))
+
+    # 表示形式
+    for row_idx in range(2, len(confirming_rows) + 2):
+        ws_confirming.cell(row=row_idx, column=1).number_format = "mm/dd hh:mm"
+        ws_confirming.cell(row=row_idx, column=2).number_format = "mm/dd"
+
+    # 色分け
+    color_confirming_list(ws_confirming, today)
+
+    wb.save(file_path)
