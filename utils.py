@@ -280,6 +280,11 @@ def parse_date(
         # 0やNaNはNone
         if value == 0 or value != value:  # NaN check
             return None
+        # Excelシリアル値（1〜2958465）→ 日付変換
+        # Excel基準日: 1899/12/30 + days
+        int_val = int(value)
+        if 1 <= int_val <= 2958465:
+            return datetime.date(1899, 12, 30) + datetime.timedelta(days=int_val)
         return None
 
     text = str(value).strip()

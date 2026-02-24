@@ -161,6 +161,32 @@ class TestParseDate:
     def test_zero(self):
         assert parse_date(0) is None
 
+    # --- Excelシリアル値 ---
+
+    def test_excel_serial_46082(self):
+        """Excelシリアル値: 46082 → 2026/3/1"""
+        assert parse_date(46082) == datetime.date(2026, 3, 1)
+
+    def test_excel_serial_1(self):
+        """Excelシリアル値: 1 → 1899/12/31"""
+        assert parse_date(1) == datetime.date(1899, 12, 31)
+
+    def test_excel_serial_float(self):
+        """Excelシリアル値: float型でも変換"""
+        assert parse_date(46082.0) == datetime.date(2026, 3, 1)
+
+    def test_excel_serial_45658(self):
+        """Excelシリアル値: 45658 → 2025/1/1"""
+        assert parse_date(45658) == datetime.date(2025, 1, 1)
+
+    def test_excel_serial_negative(self):
+        """Excelシリアル値: 負値はNone"""
+        assert parse_date(-1) is None
+
+    def test_excel_serial_over_max(self):
+        """Excelシリアル値: 上限超えはNone"""
+        assert parse_date(2958466) is None
+
     # --- 月/日のみ（年補完） ---
 
     def test_month_day_future(self):
