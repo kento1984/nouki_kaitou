@@ -506,10 +506,13 @@ def _apply_number_formats(ws: Worksheet, last_data_row: int) -> None:
         # A列（受注日）
         ws.cell(row=row, column=1).number_format = "m/d(aaa)"
 
-        # F列（数量）: 整数カンマ区切り
+        # F列（数量）: カンマ区切り（小数があればそのまま表示）
         cell_f = ws.cell(row=row, column=6)
         if isinstance(cell_f.value, (int, float)):
-            cell_f.number_format = "#,##0"
+            if isinstance(cell_f.value, float) and cell_f.value != int(cell_f.value):
+                cell_f.number_format = "#,##0.###"
+            else:
+                cell_f.number_format = "#,##0"
 
         # G列・H列（単価・金額）: カンマ区切り
         for col in [7, 8]:
@@ -587,10 +590,13 @@ def _apply_all_data_formatting(
                 cell.font = _FONT_10
 
             elif col == 6:
-                # F列: 数量 — フォント + カンマ区切り
+                # F列: 数量 — フォント + カンマ区切り（小数があればそのまま表示）
                 cell.font = _FONT_10
                 if isinstance(cell.value, (int, float)):
-                    cell.number_format = "#,##0"
+                    if isinstance(cell.value, float) and cell.value != int(cell.value):
+                        cell.number_format = "#,##0.###"
+                    else:
+                        cell.number_format = "#,##0"
 
             elif col in (7, 8):
                 # G,H列: 単価・金額 — 確認中赤字 or 数値書式
