@@ -63,7 +63,16 @@ class SelectionDialog:
         """
         self._root = tk.Tk()
         self._root.title("受注データ抽出")
-        self._root.geometry("600x770")
+        # 画面サイズに応じてウィンドウ高さを調整（小画面対応）
+        screen_h = self._root.winfo_screenheight()
+        win_h = min(770, screen_h - 100)
+        self._ops_y = win_h - 80
+        self._cust_frame_h = win_h - 290
+        self._order_frame_h = win_h - 154
+        self._cust_list_h = self._cust_frame_h - 66
+        self._order_text_h = self._order_frame_h - 60
+
+        self._root.geometry(f"600x{win_h}")
         self._root.resizable(False, False)
         self._root.configure(bg="#ECF5FF")
 
@@ -159,7 +168,7 @@ class SelectionDialog:
             padx=8,
             pady=4,
         )
-        self._frame_customers.place(x=12, y=204, width=564, height=480)
+        self._frame_customers.place(x=12, y=204, width=564, height=self._cust_frame_h)
 
         self._build_customer_frame()
 
@@ -172,13 +181,13 @@ class SelectionDialog:
             padx=8,
             pady=4,
         )
-        self._frame_ordernumbers.place(x=12, y=68, width=564, height=616)
+        self._frame_ordernumbers.place(x=12, y=68, width=564, height=self._order_frame_h)
 
         self._build_ordernumber_frame()
 
         # --- 操作ボタンフレーム ---
         self._frame_operations = tk.Frame(root, bg="#F0F8FF")
-        self._frame_operations.place(x=12, y=690, width=564, height=70)
+        self._frame_operations.place(x=12, y=self._ops_y, width=564, height=70)
 
         self._build_operation_frame()
 
@@ -262,7 +271,7 @@ class SelectionDialog:
 
         # リストボックス + スクロールバー
         list_frame = tk.Frame(frame, bg="#E8F4FD")
-        list_frame.place(x=4, y=28, width=532, height=414)
+        list_frame.place(x=4, y=28, width=532, height=self._cust_list_h)
 
         scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -290,7 +299,7 @@ class SelectionDialog:
 
         # テキストエリア + スクロールバー
         text_frame = tk.Frame(frame, bg="#E1EFFC")
-        text_frame.place(x=0, y=28, width=540, height=556)
+        text_frame.place(x=0, y=28, width=540, height=self._order_text_h)
 
         scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -365,7 +374,7 @@ class SelectionDialog:
 
         if mode == "period":
             self._frame_period.place(x=12, y=68, width=564, height=130)
-            self._frame_customers.place(x=12, y=204, width=564, height=480)
+            self._frame_customers.place(x=12, y=204, width=564, height=self._cust_frame_h)
             self._frame_ordernumbers.place_forget()
 
             # 選択系ボタン表示
@@ -379,7 +388,7 @@ class SelectionDialog:
         else:
             self._frame_period.place_forget()
             self._frame_customers.place_forget()
-            self._frame_ordernumbers.place(x=12, y=68, width=564, height=616)
+            self._frame_ordernumbers.place(x=12, y=68, width=564, height=self._order_frame_h)
 
             # 選択系ボタン非表示
             self._btn_select_all.place_forget()
