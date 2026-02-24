@@ -161,6 +161,41 @@ class TestParseDate:
     def test_zero(self):
         assert parse_date(0) is None
 
+    # --- 月/日のみ（年補完） ---
+
+    def test_month_day_future(self):
+        """月/日のみ: 今日より未来 → 今年"""
+        today = datetime.date(2026, 2, 24)
+        assert parse_date("3/10", today=today) == datetime.date(2026, 3, 10)
+
+    def test_month_day_past(self):
+        """月/日のみ: 今日より過去 → 翌年"""
+        today = datetime.date(2026, 2, 24)
+        assert parse_date("1/5", today=today) == datetime.date(2027, 1, 5)
+
+    def test_month_day_today(self):
+        """月/日のみ: 今日と同日 → 今年（過去ではない）"""
+        today = datetime.date(2026, 2, 24)
+        assert parse_date("2/24", today=today) == datetime.date(2026, 2, 24)
+
+    def test_month_day_year_end(self):
+        """月/日のみ: 年末の入力"""
+        today = datetime.date(2026, 2, 24)
+        assert parse_date("12/25", today=today) == datetime.date(2026, 12, 25)
+
+    def test_month_day_invalid(self):
+        """月/日のみ: 不正な日付"""
+        today = datetime.date(2026, 2, 24)
+        assert parse_date("2/30", today=today) is None
+
+    def test_month_day_no_today(self):
+        """月/日のみ: today省略時もパースできる"""
+        # 実行日依存だが、Noneにならないことだけ確認
+        result = parse_date("6/15")
+        assert result is not None
+        assert result.month == 6
+        assert result.day == 15
+
 
 # ============================================
 # parse_time

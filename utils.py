@@ -249,11 +249,23 @@ _DATE_FORMATS = [
 ]
 
 
-def parse_date(value: object) -> datetime.date | None:
+def parse_date(
+    value: object,
+    *,
+    today: datetime.date | None = None,
+) -> datetime.date | None:
     """様々な形式の日付値をdatetime.dateに変換する。
 
     VBAのCDateは非常に柔軟だが、Pythonでは明示的にパースする必要がある。
-    対応形式: datetime, date, str("YYYY/M/D", "YYYY-M-D"等)
+    対応形式: datetime, date, str("YYYY/M/D", "YYYY-M-D", "M/D"等)
+
+    月/日のみの場合（例: "1/5", "3/10"）は今年を補完し、
+    補完した日付が今日より過去なら翌年にする。
+    確認中一覧のJ列（手入力）で年なし入力に対応するための仕様。
+
+    Args:
+        value: パース対象の値
+        today: 年補完の基準日（省略時は実行日）
     """
     if value is None:
         return None
@@ -291,6 +303,20 @@ def parse_date(value: object) -> datetime.date | None:
             )
         except ValueError:
             pass
+
+    # "1/5", "3/10" のような月/日のみの形式（年を補完）
+    match = re.match(r"(\d{1,2})/(\d{1,2})$", text)
+    if match:
+        base = today or datetime.date.today()
+        month = int(match.group(1))
+        day = int(match.group(2))
+        try:
+            result = datetime.date(base.year, month, day)
+        except ValueError:
+            return None
+        if result < base:
+            result = result.replace(year=base.year + 1)
+        return result
 
     return None
 
