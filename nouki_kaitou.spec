@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='nouki_kaitou',
+    name='納期回答書作成',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
