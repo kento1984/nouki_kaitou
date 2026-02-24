@@ -1,6 +1,8 @@
 """utils.py のユニットテスト"""
 
 import datetime
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +14,7 @@ from nouki_kaitou.utils import (
     format_date_japanese,
     format_quantity,
     is_december_31,
+    is_file_open,
     is_numeric_char,
     normalize_name_for_comparison,
     parse_date,
@@ -413,3 +416,40 @@ class TestFormatQuantity:
     def test_zero_decimal(self):
         """0.00"""
         assert format_quantity("0.00") == "0"
+
+
+# ============================================
+# is_file_open
+# ============================================
+class TestIsFileOpen:
+    def test_not_open(self):
+        """使用中でないファイル → False"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            f.write(b"dummy")
+            path = f.name
+        try:
+            assert is_file_open(path) is False
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_nonexistent_file(self):
+        """存在しないファイル → False"""
+        assert is_file_open("/tmp/nonexistent_file_12345.xlsx") is False
+
+    def test_permission_error_returns_true(self, monkeypatch):
+        """PermissionError発生 → True（Excel等が排他ロック中を想定）"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            f.write(b"dummy")
+            path = f.name
+        try:
+            original_open = open
+
+            def mock_open(p, *a, **kw):
+                if str(p) == path and "r+b" in a:
+                    raise PermissionError("file is locked")
+                return original_open(p, *a, **kw)
+
+            monkeypatch.setattr("builtins.open", mock_open)
+            assert is_file_open(path) is True
+        finally:
+            Path(path).unlink(missing_ok=True)

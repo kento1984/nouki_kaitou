@@ -432,11 +432,19 @@ def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
 
     # マスターファイル読み込み（GUI表示用 → run()でも再利用）
     mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
+    if mfg_found and is_file_open(str(mfg_found)):
+        print("エラー: メーカー一覧.xlsxが使用中です。")
+        print("  メーカー一覧.xlsxを閉じてから再実行してください。")
+        sys.exit(1)
     mfg_wb = load_workbook(str(mfg_found), data_only=True) if mfg_found else None
 
     cust_found = _find_file_in_dir(tool_folder, "顧客マスター_v2.xlsm")
     if not cust_found:
         print(f"エラー: 顧客マスターが見つかりません: {tool_folder}")
+        sys.exit(1)
+    if is_file_open(str(cust_found)):
+        print("エラー: 顧客マスター_v2.xlsmが使用中です。")
+        print("  顧客マスター_v2.xlsmを閉じてから再実行してください。")
         sys.exit(1)
     cust_wb = load_workbook(str(cust_found), data_only=True)
 
@@ -518,6 +526,10 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
 
         mfg_found = _find_file_in_dir(tool_folder, "メーカー一覧.xlsx")
         if mfg_found:
+            if is_file_open(str(mfg_found)):
+                print("エラー: メーカー一覧.xlsxが使用中です。")
+                print("  メーカー一覧.xlsxを閉じてから再実行してください。")
+                sys.exit(1)
             mfg_wb = load_workbook(str(mfg_found), data_only=True)
         else:
             print(f"警告: メーカー一覧が見つかりません: {tool_folder}")
@@ -527,6 +539,10 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         cust_found = _find_file_in_dir(tool_folder, "顧客マスター_v2.xlsm")
         if not cust_found:
             print(f"エラー: 顧客マスターが見つかりません: {tool_folder}")
+            sys.exit(1)
+        if is_file_open(str(cust_found)):
+            print("エラー: 顧客マスター_v2.xlsmが使用中です。")
+            print("  顧客マスター_v2.xlsmを閉じてから再実行してください。")
             sys.exit(1)
         cust_wb = load_workbook(str(cust_found), data_only=True)
 
