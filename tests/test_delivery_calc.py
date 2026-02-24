@@ -1182,6 +1182,63 @@ class TestCustomerNameNormalizationInCalc:
         # 受注先=出荷先 → 配達予定
         assert "配達予定" in result
 
+    def test_stock_rosenbin_specified(self):
+        """在庫販売+路線便+指定納期 → use_ship_rule=True → 1営業日逆算 → 出荷予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            specified_delivery_date=datetime.date(2026, 3, 10),  # 火
+            storage_place="関東商品センター",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+        )
+        cache = _make_cache(cust_route={"顧客A": True})
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, cache, holidays=holidays, today=TODAY, branch=BRANCH
+        )
+        # 路線便 → use_ship_rule=True → 前営業日=3/9(月) → 出荷予定
+        assert result == "3月9日出荷予定"
+
+    def test_stock_rosenbin_completed(self):
+        """在庫販売+路線便+処理完了 → use_ship_rule=True → 出荷予定"""
+        row = _make_row(
+            document_type="【受注】在庫販売",
+            ship_status="処理完了",
+            registration_date=datetime.date(2026, 2, 16),  # 月
+            time_value="10:00:00",
+            storage_place="関東商品センター",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+        )
+        cache = _make_cache(cust_route={"顧客A": True})
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, cache, holidays=holidays, today=TODAY, branch=BRANCH
+        )
+        # 路線便 → use_ship_rule=True → 10時<15時 → 当日出荷
+        assert result == "2月16日出荷済み"
+
+    def test_himozuki_rosenbin_specified(self):
+        """紐付き+路線便+指定納期 → max(daysToAdd-1,0)営業日 → 出荷予定"""
+        row = _make_row(
+            document_type="【受注】直送販売",
+            specified_delivery_date=datetime.date(2026, 3, 10),  # 火
+            storage_place="関東商品センター",
+            item_group_code="D01",
+            customer_name="顧客A",
+            ship_to_name="顧客A",
+        )
+        cache = _make_cache(
+            mfg_days={"D01": 3},
+            cust_route={"顧客A": True},
+        )
+        holidays = _holidays()
+        result = calculate_delivery_date(
+            row, cache, holidays=holidays, today=TODAY, branch=BRANCH
+        )
+        # 路線便+曜日なし: max(3-1,0)=2営業日 → 3/10+2営業日=3/12(木)
+        assert result == "3月12日出荷予定"
+
     def test_stock_sale_same_customer_fullwidth(self):
         """在庫販売: 全角/半角が同一顧客ならuse_ship_rule=False→配達"""
         row = _make_row(
