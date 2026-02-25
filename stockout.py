@@ -47,11 +47,31 @@ def extract_approx_delivery(comment: str) -> str:
     # 全角→半角変換
     after = convert_to_half_width(after)
 
-    # パターン1: 「○月上旬/中旬/下旬」
-    match_junme = re.search(r"(\d{1,2})月(上旬|中旬|下旬)", after)
+    # パターン1: 「○月上旬/中旬/下旬」（初旬→上旬、半ば→中旬として扱う）
+    # 範囲指定（～/〜/から）がある場合は後半を採用
+    _PERIOD_NORMALIZE = {"初旬": "上旬", "半ば": "中旬"}
+    range_match = re.search(
+        r"(\d{1,2})月(上旬|中旬|下旬|初旬|半ば)[～〜](上旬|中旬|下旬|初旬|半ば)",
+        after,
+    )
+    if not range_match:
+        range_match = re.search(
+            r"(\d{1,2})月(上旬|中旬|下旬|初旬|半ば)から(上旬|中旬|下旬|初旬|半ば)",
+            after,
+        )
+    if range_match:
+        month = int(range_match.group(1))
+        period = range_match.group(3)
+        period = _PERIOD_NORMALIZE.get(period, period)
+        return f"{month}月{period}入荷予定"
+
+    match_junme = re.search(
+        r"(\d{1,2})月(上旬|中旬|下旬|初旬|半ば)", after
+    )
     if match_junme:
         month = int(match_junme.group(1))
         period = match_junme.group(2)
+        period = _PERIOD_NORMALIZE.get(period, period)
         return f"{month}月{period}入荷予定"
 
     # パターン2: 「○/○頃」or「○月○日頃」
@@ -119,7 +139,7 @@ def remove_stockout_text(text: str) -> str:
 
         if "月" in check_text or "/" in check_text:
             # 終端キーワードを探す
-            for keyword in ["予定", "頃", "上旬", "中旬", "下旬", "月末"]:
+            for keyword in ["予定", "頃", "上旬", "中旬", "下旬", "初旬", "半ば", "月末"]:
                 pos = check_text.find(keyword)
                 if pos >= 0:
                     candidate = pos + len(keyword)

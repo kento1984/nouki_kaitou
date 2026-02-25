@@ -59,6 +59,36 @@ class TestExtractApproxDelivery:
         """欠品中の後にスペース"""
         assert extract_approx_delivery("欠品中　3月中旬") == "3月中旬入荷予定"
 
+    # --- 初旬・半ば ---
+    def test_shojun(self):
+        """初旬 → 上旬として扱う"""
+        assert extract_approx_delivery("欠品中 3月初旬予定") == "3月上旬入荷予定"
+
+    def test_nakaba(self):
+        """半ば → 中旬として扱う"""
+        assert extract_approx_delivery("欠品中 3月半ば予定") == "3月中旬入荷予定"
+
+    # --- 範囲指定（後半を採用） ---
+    def test_range_joujun_to_chuujun(self):
+        """上旬～中旬 → 中旬"""
+        assert extract_approx_delivery("欠品中 3月上旬～中旬予定") == "3月中旬入荷予定"
+
+    def test_range_joujun_to_gejun(self):
+        """上旬～下旬 → 下旬"""
+        assert extract_approx_delivery("欠品中 3月上旬～下旬予定") == "3月下旬入荷予定"
+
+    def test_range_shojun_to_nakaba(self):
+        """初旬～半ば → 中旬"""
+        assert extract_approx_delivery("欠品中 3月初旬～半ば予定") == "3月中旬入荷予定"
+
+    def test_range_with_kara(self):
+        """「から」区切り"""
+        assert extract_approx_delivery("欠品中 3月上旬から下旬予定") == "3月下旬入荷予定"
+
+    def test_range_wave_dash(self):
+        """波ダッシュ（〜 U+301C）区切り"""
+        assert extract_approx_delivery("欠品中 3月上旬〜中旬予定") == "3月中旬入荷予定"
+
     def test_invalid_month_day(self):
         """無効な月日"""
         assert extract_approx_delivery("欠品中 13/32頃") == ""
@@ -100,6 +130,22 @@ class TestRemoveStockoutText:
     def test_stockout_with_matsu(self):
         """「月末」パターン"""
         assert remove_stockout_text("欠品中 3月末") == ""
+
+    def test_stockout_shojun(self):
+        """初旬パターン除去"""
+        assert remove_stockout_text("欠品中 3月初旬予定") == ""
+
+    def test_stockout_nakaba(self):
+        """半ばパターン除去"""
+        assert remove_stockout_text("欠品中 3月半ば予定") == ""
+
+    def test_stockout_range(self):
+        """範囲パターン除去"""
+        assert remove_stockout_text("欠品中 3月上旬～中旬予定") == ""
+
+    def test_stockout_range_with_prefix(self):
+        """範囲パターン + 前方テキスト"""
+        assert remove_stockout_text("テスト 欠品中 3月初旬～半ば予定") == "テスト"
 
 
 # ============================================
