@@ -61,9 +61,11 @@ def extract_approx_delivery(comment: str) -> str:
         )
     if range_match:
         month = int(range_match.group(1))
-        period = range_match.group(3)
-        period = _PERIOD_NORMALIZE.get(period, period)
-        return f"{month}月{period}入荷予定"
+        period_from = range_match.group(2)
+        period_to = range_match.group(3)
+        period_from = _PERIOD_NORMALIZE.get(period_from, period_from)
+        period_to = _PERIOD_NORMALIZE.get(period_to, period_to)
+        return f"{month}月{period_from}～{period_to}入荷予定"
 
     match_junme = re.search(
         r"(\d{1,2})月(上旬|中旬|下旬|初旬|半ば)", after

@@ -70,24 +70,24 @@ class TestExtractApproxDelivery:
 
     # --- 範囲指定（後半を採用） ---
     def test_range_joujun_to_chuujun(self):
-        """上旬～中旬 → 中旬"""
-        assert extract_approx_delivery("欠品中 3月上旬～中旬予定") == "3月中旬入荷予定"
+        """上旬～中旬 → 範囲表示"""
+        assert extract_approx_delivery("欠品中 3月上旬～中旬予定") == "3月上旬～中旬入荷予定"
 
     def test_range_joujun_to_gejun(self):
-        """上旬～下旬 → 下旬"""
-        assert extract_approx_delivery("欠品中 3月上旬～下旬予定") == "3月下旬入荷予定"
+        """上旬～下旬 → 範囲表示"""
+        assert extract_approx_delivery("欠品中 3月上旬～下旬予定") == "3月上旬～下旬入荷予定"
 
     def test_range_shojun_to_nakaba(self):
-        """初旬～半ば → 中旬"""
-        assert extract_approx_delivery("欠品中 3月初旬～半ば予定") == "3月中旬入荷予定"
+        """初旬～半ば → 正規化して範囲表示"""
+        assert extract_approx_delivery("欠品中 3月初旬～半ば予定") == "3月上旬～中旬入荷予定"
 
     def test_range_with_kara(self):
         """「から」区切り"""
-        assert extract_approx_delivery("欠品中 3月上旬から下旬予定") == "3月下旬入荷予定"
+        assert extract_approx_delivery("欠品中 3月上旬から下旬予定") == "3月上旬～下旬入荷予定"
 
     def test_range_wave_dash(self):
         """波ダッシュ（〜 U+301C）区切り"""
-        assert extract_approx_delivery("欠品中 3月上旬〜中旬予定") == "3月中旬入荷予定"
+        assert extract_approx_delivery("欠品中 3月上旬〜中旬予定") == "3月上旬～中旬入荷予定"
 
     def test_invalid_month_day(self):
         """無効な月日"""
