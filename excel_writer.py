@@ -166,6 +166,7 @@ def create_header(
     customer_name: str,
     rep_name: str = "",
     issue_date: Optional[datetime.date] = None,
+    branch: Optional[BranchSettings] = None,
 ) -> None:
     """回答書のヘッダー（行1〜6）を作成する。
 
@@ -174,6 +175,7 @@ def create_header(
         customer_name: 顧客名
         rep_name: 担当者名（担当者分割時）
         issue_date: 発行日（Noneなら今日）
+        branch: 営業所設定（L列ヘッダー切替用）
     """
     if issue_date is None:
         issue_date = datetime.date.today()
@@ -228,7 +230,12 @@ def create_header(
     header_fill = _make_fill(_HEADER_BG)
     header_align = Alignment(horizontal="center", vertical="center")
 
-    for col_idx, label in enumerate(_HEADER_LABELS, start=1):
+    # remarks_mode=external のときL列ヘッダーを「連絡事項」に変更
+    labels = list(_HEADER_LABELS)
+    if branch and branch.remarks_mode == "external":
+        labels[11] = "連絡事項"
+
+    for col_idx, label in enumerate(labels, start=1):
         cell = ws.cell(row=6, column=col_idx)
         cell.value = label
         cell.font = header_font
@@ -274,6 +281,7 @@ def copy_data_row(
     ws: Worksheet,
     target_row: int,
     report_row: ReportRow,
+    external_comment: str = "",
 ) -> None:
     """レポート行をExcelシートに書き込む。
 
@@ -284,6 +292,7 @@ def copy_data_row(
         ws: 対象ワークシート
         target_row: 書き込み先行番号（7〜）
         report_row: 書き込みデータ
+        external_comment: L列に表示する社外コメント（remarks_mode=external時のみ使用）
     """
     ws.cell(row=target_row, column=1).value = report_row.registration_date
     ws.cell(row=target_row, column=2).value = report_row.customer_contact
@@ -300,7 +309,10 @@ def copy_data_row(
     ws.cell(row=target_row, column=9).value = report_row.delivery_answer
     ws.cell(row=target_row, column=10).value = report_row.delivery_place
     ws.cell(row=target_row, column=11).value = report_row.remarks
-    ws.cell(row=target_row, column=12).value = report_row.order_number
+    # L列: remarks_mode=external なら社外コメント、それ以外は注番
+    ws.cell(row=target_row, column=12).value = (
+        external_comment if external_comment else report_row.order_number
+    )
 
     # 偶数行は薄いブルー
     if target_row % 2 == 0:
@@ -373,7 +385,7 @@ def format_report(
         today = datetime.date.today()
 
     # データ行の全書式を1パスで適用（5ループ→1ループに統合して高速化）
-    _apply_all_data_formatting(ws, last_data_row, today)
+    _apply_all_data_formatting(ws, last_data_row, today, branch)
 
     # 税抜き注記
     note_row = last_data_row + 1
@@ -548,6 +560,7 @@ def _apply_all_data_formatting(
     ws: Worksheet,
     last_data_row: int,
     today: datetime.date,
+    branch: Optional[BranchSettings] = None,
 ) -> None:
     """データ行のフォント・色分け・数値書式・罫線を1パスで適用する。
 
@@ -584,9 +597,15 @@ def _apply_all_data_formatting(
                 cell.font = _FONT_10
                 cell.number_format = "m/d(aaa)"
 
-            elif col in (2, 3, 4, 5, 12):
-                # B,C,D,E,L列: テキスト列 — フォントのみ
+            elif col in (2, 3, 4, 5):
+                # B,C,D,E列: テキスト列 — フォントのみ
                 cell.font = _FONT_10
+
+            elif col == 12:
+                # L列: 注番 or 連絡事項
+                cell.font = _FONT_10
+                if branch and branch.remarks_mode == "external":
+                    cell.alignment = _ALIGN_SHRINK
 
             elif col == 6:
                 # F列: 数量 — フォント + カンマ区切り（小数があればそのまま表示）

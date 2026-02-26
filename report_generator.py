@@ -51,7 +51,7 @@ from nouki_kaitou.representative import (
     should_include_for_rep,
 )
 from nouki_kaitou.stockout import extract_approx_delivery, remove_stockout_text
-from nouki_kaitou.tracking import extract_tracking_info
+from nouki_kaitou.tracking import clean_external_comment, extract_tracking_info
 from nouki_kaitou.utils import (
     build_report_filename,
     build_sheet_name,
@@ -252,9 +252,10 @@ def create_delivery_report_by_order_numbers(
     wb = Workbook()
     ws = wb.active
     ws.title = build_sheet_name(customer_name, rep_name)
-    create_header(ws, customer_name, rep_name, today)
+    create_header(ws, customer_name, rep_name, today, branch)
 
     current_row = 7
+    is_external_mode = branch is not None and branch.remarks_mode == "external"
 
     # 担当者フィルタ用キャッシュ
     registered_rep_list: list[str] = []
@@ -284,7 +285,10 @@ def create_delivery_report_by_order_numbers(
         report_row, delivery_status = build_report_row(
             row, cache, holidays, branch, execution_time, False, today
         )
-        copy_data_row(ws, current_row, report_row)
+        ext_comment = ""
+        if is_external_mode and row.comment_external.strip():
+            ext_comment = clean_external_comment(row.comment_external)
+        copy_data_row(ws, current_row, report_row, ext_comment)
 
         # --- 情報収集 ---
         _collect_tracking_info(row, cache, tracking_info_list)
@@ -379,9 +383,10 @@ def create_delivery_report(
     wb = Workbook()
     ws = wb.active
     ws.title = build_sheet_name(customer_name, rep_name)
-    create_header(ws, customer_name, rep_name, today)
+    create_header(ws, customer_name, rep_name, today, branch)
 
     current_row = 7
+    is_external_mode = branch is not None and branch.remarks_mode == "external"
 
     # 担当者フィルタ用キャッシュ
     registered_rep_list: list[str] = []
@@ -465,7 +470,10 @@ def create_delivery_report(
             delivery_status = "納品済み"
             report_row.delivery_answer = "納品済み"
 
-        copy_data_row(ws, current_row, report_row)
+        ext_comment = ""
+        if is_external_mode and row.comment_external.strip():
+            ext_comment = clean_external_comment(row.comment_external)
+        copy_data_row(ws, current_row, report_row, ext_comment)
 
         # --- メーカー名・品名を解決（情報収集用） ---
         manufacturer_name = report_row.manufacturer_name

@@ -48,6 +48,7 @@ class BranchSettings:
     shared_email: str = ""          # g_SharedEmail: 共有メールアドレス
     signature: str = ""             # g_Signature: メール署名
     start_date: str = ""            # g_StartDate: 運用開始日（yyyy/mm/dd形式）
+    remarks_mode: str = "detail"    # L列表示モード（detail=注番, external=連絡事項）
 
 
 # ============================================

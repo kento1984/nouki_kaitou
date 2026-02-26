@@ -112,7 +112,7 @@ def load_branch_settings(
     except KeyError:
         return settings
 
-    for row in branch_ws.iter_rows(min_row=2, max_col=6, values_only=True):
+    for row in branch_ws.iter_rows(min_row=2, max_col=7, values_only=True):
         code = str(row[0]).strip() if row[0] else ""
         if code == branch_code:
             settings.name = str(row[1]).strip() if row[1] else ""
@@ -127,6 +127,11 @@ def load_branch_settings(
                 d = parse_date(row[5])
                 if d:
                     settings.start_date = d.strftime("%Y/%m/%d")
+            # G列: 注番列の表示（「連絡事項」→L列を社外コメントに切替）
+            if len(row) > 6 and row[6]:
+                mode = str(row[6]).strip()
+                if mode == "連絡事項":
+                    settings.remarks_mode = "external"
             break
 
     return settings

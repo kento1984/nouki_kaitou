@@ -857,6 +857,120 @@ class TestCreateDeliveryReportByOrderNumbers:
 
 
 # ============================================
+# A案: remarks_mode=external でL列が社外コメントになる
+# ============================================
+class TestRemarksMode:
+    """remarks_mode=external のL列置き換えテスト"""
+
+    def test_external_mode_l_column_header(self, tmp_path):
+        """remarks_mode=external → L列ヘッダーが「連絡事項」"""
+        branch = BranchSettings(
+            name="松本営業所", default_cutoff=15, remarks_mode="external",
+        )
+        data = [_make_row(order_number="100", comment_external="納品書同封")]
+        cache = _make_cache()
+        result = create_delivery_report_by_order_numbers(
+            data, "テスト商事", ["100"],
+            cache, tmp_path, {}, branch, EXEC_TIME, today=TODAY,
+        )
+        assert result is not None
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        assert ws.cell(row=6, column=12).value == "連絡事項"
+
+    def test_external_mode_l_column_value(self, tmp_path):
+        """remarks_mode=external → L列にクリーニング済み社外コメント"""
+        branch = BranchSettings(
+            name="松本営業所", default_cutoff=15, remarks_mode="external",
+        )
+        data = [_make_row(order_number="100", comment_external="納品書同封")]
+        cache = _make_cache()
+        result = create_delivery_report_by_order_numbers(
+            data, "テスト商事", ["100"],
+            cache, tmp_path, {}, branch, EXEC_TIME, today=TODAY,
+        )
+        assert result is not None
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        assert ws.cell(row=7, column=12).value == "納品書同封"
+
+    def test_external_mode_tracking_stripped(self, tmp_path):
+        """remarks_mode=external → 送り状番号は除去される"""
+        branch = BranchSettings(
+            name="松本営業所", default_cutoff=15, remarks_mode="external",
+        )
+        data = [_make_row(
+            order_number="100",
+            comment_external="佐川:1234567890 納品書同封",
+        )]
+        cache = _make_cache()
+        result = create_delivery_report_by_order_numbers(
+            data, "テスト商事", ["100"],
+            cache, tmp_path, {}, branch, EXEC_TIME, today=TODAY,
+        )
+        assert result is not None
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        val = ws.cell(row=7, column=12).value
+        assert "佐川" not in str(val)
+        assert "納品書同封" in str(val)
+
+    def test_external_mode_tracking_only_empty(self, tmp_path):
+        """社外コメントが送り状番号のみ → L列は空文字でなく注番フォールバック"""
+        branch = BranchSettings(
+            name="松本営業所", default_cutoff=15, remarks_mode="external",
+        )
+        data = [_make_row(order_number="100", comment_external="佐川:1234567890")]
+        cache = _make_cache()
+        result = create_delivery_report_by_order_numbers(
+            data, "テスト商事", ["100"],
+            cache, tmp_path, {}, branch, EXEC_TIME, today=TODAY,
+        )
+        assert result is not None
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        # クリーニング結果が空 → external_comment="" → 注番にフォールバック
+        assert ws.cell(row=7, column=12).value == "100"
+
+    def test_detail_mode_l_column_unchanged(self, tmp_path):
+        """remarks_mode=detail → L列は注番のまま"""
+        branch = BranchSettings(
+            name="京葉営業所", default_cutoff=15, remarks_mode="detail",
+        )
+        data = [_make_row(order_number="100", comment_external="納品書同封")]
+        cache = _make_cache()
+        result = create_delivery_report_by_order_numbers(
+            data, "テスト商事", ["100"],
+            cache, tmp_path, {}, branch, EXEC_TIME, today=TODAY,
+        )
+        assert result is not None
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        assert ws.cell(row=6, column=12).value == "弊社注番"
+        assert ws.cell(row=7, column=12).value == "100"
+
+    def test_external_mode_period_report(self, tmp_path):
+        """期間モードでもremarks_mode=externalが動作する"""
+        branch = BranchSettings(
+            name="松本営業所", default_cutoff=15, remarks_mode="external",
+        )
+        data = [_make_row(comment_external="注意事項あり")]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, branch, EXEC_TIME,
+            date_from=datetime.date(2026, 2, 1),
+            date_to=datetime.date(2026, 2, 28),
+            today=TODAY,
+        )
+        assert result is not None
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        assert ws.cell(row=6, column=12).value == "連絡事項"
+        assert ws.cell(row=7, column=12).value == "注意事項あり"
+
+
+# ============================================
 # create_delivery_report
 # ============================================
 class TestCreateDeliveryReport:

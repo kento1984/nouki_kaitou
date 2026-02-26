@@ -108,6 +108,29 @@ class TestCreateHeader:
         for col_idx, label in enumerate(_HEADER_LABELS, start=1):
             assert ws.cell(row=6, column=col_idx).value == label
 
+    def test_header_labels_external_mode(self):
+        """remarks_mode=external → L列ヘッダーが「連絡事項」"""
+        wb = Workbook()
+        ws = wb.active
+        branch = BranchSettings(name="松本営業所", remarks_mode="external")
+        create_header(ws, "テスト", branch=branch)
+        assert ws.cell(row=6, column=12).value == "連絡事項"
+
+    def test_header_labels_detail_mode(self):
+        """remarks_mode=detail → L列ヘッダーが「弊社注番」のまま"""
+        wb = Workbook()
+        ws = wb.active
+        branch = BranchSettings(name="京葉営業所", remarks_mode="detail")
+        create_header(ws, "テスト", branch=branch)
+        assert ws.cell(row=6, column=12).value == "弊社注番"
+
+    def test_header_labels_no_branch(self):
+        """branch=None → L列ヘッダーが「弊社注番」のまま"""
+        wb = Workbook()
+        ws = wb.active
+        create_header(ws, "テスト", branch=None)
+        assert ws.cell(row=6, column=12).value == "弊社注番"
+
     def test_row_heights(self):
         """行の高さ設定"""
         wb = Workbook()
@@ -234,6 +257,30 @@ class TestCopyDataRow:
             datetime.date(2026, 1, 1), "CC", "CON", "MN", "PN",
             "Q", "UP", "NA", "DA", "DP", "RM", "ON",
         ]
+
+    def test_external_comment_in_l_column(self):
+        """external_comment指定時、L列に社外コメントが出力される"""
+        wb = Workbook()
+        ws = wb.active
+        row = self._make_row(order_number="12345-10")
+        copy_data_row(ws, 7, row, external_comment="納品書同封")
+        assert ws.cell(row=7, column=12).value == "納品書同封"
+
+    def test_empty_external_comment_falls_back(self):
+        """external_comment空文字 → 注番が出力される"""
+        wb = Workbook()
+        ws = wb.active
+        row = self._make_row(order_number="12345-10")
+        copy_data_row(ws, 7, row, external_comment="")
+        assert ws.cell(row=7, column=12).value == "12345-10"
+
+    def test_no_external_comment_default(self):
+        """external_comment省略 → 注番が出力される"""
+        wb = Workbook()
+        ws = wb.active
+        row = self._make_row(order_number="12345-10")
+        copy_data_row(ws, 7, row)
+        assert ws.cell(row=7, column=12).value == "12345-10"
 
 
 # ============================================

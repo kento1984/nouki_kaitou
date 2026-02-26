@@ -184,6 +184,62 @@ class TestLoadBranchSettings:
         settings = load_branch_settings(wb, source, cols)
         assert settings.name == ""
 
+    def test_remarks_mode_renrakujikou(self):
+        """G列「連絡事項」→ remarks_mode=external"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日", "注番列の表示"],
+            ["GL", "松本営業所", 15, "関東商品センター", "", None, "連絡事項"],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("GL2Z444369")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.remarks_mode == "external"
+
+    def test_remarks_mode_empty(self):
+        """G列が空欄 → remarks_mode=detail（デフォルト）"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日", "注番列の表示"],
+            ["GL", "京葉営業所", 15, "関東商品センター", "", None, ""],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("GL2Z444369")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.remarks_mode == "detail"
+
+    def test_remarks_mode_no_g_column(self):
+        """G列がない旧フォーマット → remarks_mode=detail（デフォルト）"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日"],
+            ["GL", "京葉営業所", 15, "関東商品センター", "", None],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("GL2Z444369")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.remarks_mode == "detail"
+
+    def test_remarks_mode_unknown_value(self):
+        """G列に不明な値 → remarks_mode=detail（デフォルト）"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日", "注番列の表示"],
+            ["GL", "京葉営業所", 15, "関東商品センター", "", None, "不明"],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("GL2Z444369")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.remarks_mode == "detail"
+
 
 # ============================================
 # get_branch_settings

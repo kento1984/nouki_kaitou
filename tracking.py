@@ -9,6 +9,8 @@ VBAの以下の関数を移植:
 
 from __future__ import annotations
 
+import re
+
 from nouki_kaitou.models import TrackingEntry
 from nouki_kaitou.utils import is_numeric_char, to_half_width_num
 
@@ -219,3 +221,48 @@ def can_direct_track(carrier_name: str) -> bool:
     if "日通" in carrier_name or "日本通運" in carrier_name:
         return True
     return False
+
+
+# ============================================
+# 社外コメントから送り状・引取テキストを除去
+# ============================================
+
+# 送り状パターン: キーワード + (コロン/スペース) + 数字列（ハイフン含む）
+_TRACKING_PATTERN = re.compile(
+    r"(?:" + "|".join(re.escape(k) for k in _CARRIER_KEYWORDS) + r")"
+    r"[\s:：]*"
+    r"[\d０-９\-－]+"
+)
+
+# 引取パターン: 「引取」「引き取り」+ 前後の日付（M/D形式など）
+_PICKUP_PATTERN = re.compile(
+    r"[\d０-９]{1,2}[/／][\d０-９]{1,2}\s*引[取き]取?り?"
+    r"|引[取き]取?り?\s*[\d０-９]{1,2}[/／][\d０-９]{1,2}"
+    r"|引[取き]取?り?"
+)
+
+
+def clean_external_comment(comment: str) -> str:
+    """社外コメントから送り状番号・引取テキストを除去し、残りを返す。
+
+    L列「連絡事項」に表示するために、既に別用途で使われている情報を除去する。
+    - 送り状番号パターン（運送会社キーワード + 数字列）
+    - 引取テキスト（「引取」「引き取り」+ 日付）
+
+    Args:
+        comment: 社外コメント文字列
+
+    Returns:
+        クリーニング後のテキスト。情報がなければ空文字。
+    """
+    if not comment:
+        return ""
+
+    result = comment
+    # 送り状パターン除去
+    result = _TRACKING_PATTERN.sub("", result)
+    # 引取パターン除去
+    result = _PICKUP_PATTERN.sub("", result)
+    # 残りをクリーンアップ
+    result = re.sub(r"\s+", " ", result).strip()
+    return result

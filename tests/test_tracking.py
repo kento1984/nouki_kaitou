@@ -7,6 +7,7 @@ import pytest
 
 from nouki_kaitou.tracking import (
     can_direct_track,
+    clean_external_comment,
     extract_tracking_info,
     get_carrier_full_name,
     get_tracking_url,
@@ -244,3 +245,59 @@ class TestCanDirectTrack:
         """西濃運輸はTrue、セイノースーパーはFalse"""
         assert can_direct_track("西濃運輸") is True
         assert can_direct_track("セイノースーパーエクスプレス") is False
+
+
+# ============================================
+# CleanExternalComment
+# ============================================
+class TestCleanExternalComment:
+    """社外コメントクリーニングテスト"""
+
+    def test_tracking_only(self):
+        """送り状番号のみ → 空文字"""
+        assert clean_external_comment("佐川:1234567890") == ""
+
+    def test_tracking_with_extra_text(self):
+        """送り状番号 + 追加情報 → 追加情報のみ残る"""
+        result = clean_external_comment("佐川:1234567890 納品書同封")
+        assert result == "納品書同封"
+
+    def test_pickup_only(self):
+        """引取テキストのみ → 空文字"""
+        assert clean_external_comment("引取") == ""
+
+    def test_pickup_with_date(self):
+        """引取+日付 → 空文字"""
+        assert clean_external_comment("2/20 引取") == ""
+        assert clean_external_comment("引取 2/20") == ""
+
+    def test_pickup_hikitori(self):
+        """引き取り → 空文字"""
+        assert clean_external_comment("引き取り") == ""
+
+    def test_no_tracking_no_pickup(self):
+        """送り状なし・引取なし → そのまま"""
+        assert clean_external_comment("納品書同封") == "納品書同封"
+
+    def test_empty(self):
+        """空文字 → 空文字"""
+        assert clean_external_comment("") == ""
+
+    def test_multiple_tracking(self):
+        """複数の送り状番号 → すべて除去"""
+        result = clean_external_comment("ヤマト:1234567890123 佐川:9876543210")
+        assert result == ""
+
+    def test_tracking_and_extra(self):
+        """送り状+引取+追加情報 → 追加情報のみ"""
+        result = clean_external_comment("ヤマト:1234567890123 引取 特記事項あり")
+        assert result == "特記事項あり"
+
+    def test_fullwidth_colon(self):
+        """全角コロン区切りの送り状番号も除去"""
+        assert clean_external_comment("佐川：1234567890") == ""
+
+    def test_yamato_with_message(self):
+        """ヤマト送り状+メッセージ"""
+        result = clean_external_comment("ヤマト 1234567890123 2/25着指定")
+        assert result == "2/25着指定"
