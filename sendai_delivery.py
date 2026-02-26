@@ -143,8 +143,11 @@ def check_sendai_stock_completed(
         return _sendai_result(adjusted, "出荷済み", "出荷予定", today)
 
     # 10. 曜日制限なし
-    # biz_days==0（当日配達）: 午後に届く予定の段階なので「配達予定」
-    past_suffix = "配達予定" if biz_days == 0 else "配達済み"
+    # biz_days==0: 配達日が今日以降なら「配達予定」、過去なら「配達済み」
+    if biz_days == 0 and adjusted >= today:
+        past_suffix = "配達予定"
+    else:
+        past_suffix = "配達済み"
     return _sendai_result(adjusted, past_suffix, "配達予定", today)
 
 
@@ -228,8 +231,11 @@ def check_sendai_himozuki_completed(
         return _sendai_result(ship_date, "出荷済み", "出荷予定", today)
 
     # 9. 自社便配達
-    # biz_days==0（当日配達）: 午後に届く予定の段階なので「配達予定」
-    past_suffix = "配達予定" if biz_days == 0 else "配達済み"
+    # biz_days==0: 配達日が今日以降なら「配達予定」、過去なら「配達済み」
+    if biz_days == 0 and adjusted >= today:
+        past_suffix = "配達予定"
+    else:
+        past_suffix = "配達済み"
     return _sendai_result(adjusted, past_suffix, "配達予定", today)
 
 

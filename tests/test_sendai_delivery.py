@@ -462,6 +462,40 @@ class TestSendaiStockCompleted:
         )
         assert result is None
 
+    # --- 当日配達(biz_days==0)の過去日 ---
+
+    def test_kinrin_biz0_past_date(self):
+        """近隣2便 biz_days=0 + 登録日が過去 → 配達済み"""
+        past_date = datetime.date(2026, 2, 20)  # 金曜日（過去）
+        row = _make_row(time_value="10:00:00", reg_date=past_date)
+        cache = _make_cache("近隣2便")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(past_date) + "配達済み"
+
+    def test_enpo_gogo_biz0_past_date(self):
+        """遠方午後 biz_days=0 + 登録日が過去 → 配達済み"""
+        past_date = datetime.date(2026, 2, 19)  # 木曜日（過去）
+        row = _make_row(time_value="10:00:00", reg_date=past_date)
+        cache = _make_cache("遠方午後")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(past_date) + "配達済み"
+
+    def test_kinrin_biz0_today_still_yotei(self):
+        """近隣2便 biz_days=0 + 登録日が今日 → 配達予定（変わらず）"""
+        row = _make_row(time_value="10:00:00", reg_date=TODAY)
+        cache = _make_cache("近隣2便")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(TODAY) + "配達予定"
+
 
 # ============================================
 # TestSendaiHimozukiCompleted — 紐付き+処理完了 結合テスト
@@ -743,6 +777,19 @@ class TestSendaiHimozukiCompleted:
             "東北商品センター", True,  # is_rosenbin=True
         )
         assert result == format_date_japanese(expected) + "出荷済み"
+
+    # --- 当日配達(biz_days==0)の確認 ---
+
+    def test_kinrin_biz0_today_still_yotei(self):
+        """近隣2便 biz_days=0 + adjusted==today → 配達予定（変わらず）"""
+        row = _make_himozuki_row()
+        cache = _make_cache("近隣2便")
+        exec_time = datetime.datetime(2026, 2, 23, 10, 0)
+        result = check_sendai_himozuki_completed(
+            row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(TODAY) + "配達予定"
 
     # --- 全角/半角の顧客名比較 ---
 
