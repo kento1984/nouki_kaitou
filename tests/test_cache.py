@@ -27,8 +27,9 @@ class MockWorksheet:
     def __init__(self, data: list[list]):
         self._data = data
 
-    def iter_rows(self, min_row=1, max_col=None, values_only=False):
-        for row in self._data[min_row - 1:]:
+    def iter_rows(self, min_row=1, max_row=None, max_col=None, values_only=False):
+        end = max_row if max_row is not None else len(self._data)
+        for row in self._data[min_row - 1:end]:
             if max_col is not None:
                 yield tuple(row[:max_col])
             else:
@@ -489,8 +490,8 @@ class TestBuildPatternCache:
 # _detect_customer_master_format
 # ============================================
 class TestDetectCustomerMasterFormat:
-    def test_old_format_email(self):
-        """旧フォーマット: E列にメールアドレス"""
+    def test_old_format_email_header(self):
+        """旧フォーマット: E列ヘッダがメール関連"""
         data = [
             ["顧客名", "出荷曜日", "保持日数", "路線便", "メール"],
             ["顧客A", "月水金", 0, "", "user@example.com"],
@@ -498,8 +499,8 @@ class TestDetectCustomerMasterFormat:
         ws = MockWorksheet(data)
         assert _detect_customer_master_format(ws) is False
 
-    def test_new_format_pattern(self):
-        """新フォーマット: E列に配送パターン名"""
+    def test_new_format_pattern_header(self):
+        """新フォーマット: E列ヘッダが「配送パターン」"""
         data = [
             ["顧客名", "出荷曜日", "保持日数", "路線便", "配送パターン"],
             ["顧客A", "月水金", 0, "", "近隣2便"],
@@ -507,20 +508,36 @@ class TestDetectCustomerMasterFormat:
         ws = MockWorksheet(data)
         assert _detect_customer_master_format(ws) is True
 
-    def test_empty_e_column(self):
-        """E列が全て空→旧フォーマット（安全デフォルト）"""
+    def test_empty_e_header(self):
+        """E列ヘッダが空→旧フォーマット"""
         data = [
             ["顧客名", "出荷曜日", "保持日数", "路線便", ""],
-            ["顧客A", "月水金", 0, "", ""],
+            ["顧客A", "月水金", 0, "", "近隣2便"],
         ]
         ws = MockWorksheet(data)
         assert _detect_customer_master_format(ws) is False
 
-    def test_short_row(self):
-        """E列がない短い行→旧フォーマット"""
+    def test_short_header_row(self):
+        """ヘッダにE列がない→旧フォーマット"""
         data = [
             ["顧客名", "出荷曜日", "保持日数", "路線便"],
             ["顧客A", "月水金", 0, ""],
         ]
+        ws = MockWorksheet(data)
+        assert _detect_customer_master_format(ws) is False
+
+    def test_mailto_in_data_still_new_format(self):
+        """データ行にmailto:があってもヘッダが正しければ新フォーマット"""
+        data = [
+            ["顧客名", "出荷曜日", "保持日数", "路線便", "配送パターン",
+             "mailto:user@example.com"],
+            ["顧客A", "月水金", 0, "", "近隣2便", "user@example.com"],
+        ]
+        ws = MockWorksheet(data)
+        assert _detect_customer_master_format(ws) is True
+
+    def test_empty_worksheet(self):
+        """空のワークシート→旧フォーマット"""
+        data = []
         ws = MockWorksheet(data)
         assert _detect_customer_master_format(ws) is False

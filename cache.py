@@ -95,20 +95,18 @@ def build_manufacturer_cache(
 def _detect_customer_master_format(ws: object) -> bool:
     """顧客マスターが新フォーマット（E列=配送パターン）かどうかを検出する。
 
-    E列（0-indexed: 4）の最初の非空データセルを調べて判断する。
-    - ``@`` を含む → 旧フォーマット（E列=メールアドレス）
-    - ``@`` を含まない → 新フォーマット（E列=配送パターン名）
-    - E列が全て空 → 旧フォーマット（安全デフォルト）
+    ヘッダ行（1行目）のE列が「配送パターン」であれば新フォーマット。
+    read_only=False で開いた .xlsm ではHYPERLINK数式が ``mailto:`` として
+    展開されるため、データ行の値で判定すると誤検出する。ヘッダで判定する。
 
     Returns:
         True = 新フォーマット（E列が配送パターン列）
     """
-    for row in ws.iter_rows(min_row=2, max_col=5, values_only=True):
+    for row in ws.iter_rows(min_row=1, max_row=1, max_col=5, values_only=True):
         if len(row) < 5:
-            continue
+            return False
         val = str(row[4]).strip() if row[4] else ""
-        if val:
-            return "@" not in val
+        return val == "配送パターン"
     return False
 
 
