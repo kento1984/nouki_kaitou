@@ -383,7 +383,9 @@ def interactive_mode(args: argparse.Namespace, orders: list[OrderRow] | None = N
     return args
 
 
-def _build_email_customers(cust_wb: object) -> set[str]:
+def _build_email_customers(
+    cust_wb: object, email_start_col: int = 4
+) -> set[str]:
     """顧客マスターからメールアドレス登録済み顧客のセットを構築する。"""
     email_customers: set[str] = set()
     try:
@@ -395,8 +397,7 @@ def _build_email_customers(cust_wb: object) -> set[str]:
         name = str(row[0]).strip() if row[0] else ""
         if not name:
             continue
-        # E列（0-indexed: 4）以降にメールアドレスがあるか
-        for j in range(4, len(row)):
+        for j in range(email_start_col, len(row)):
             if row[j] and str(row[j]).strip():
                 email_customers.add(name)
                 break
@@ -457,7 +458,7 @@ def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
     )
 
     master_customers = set(cache.cust_days.keys())
-    email_customers = _build_email_customers(cust_wb)
+    email_customers = _build_email_customers(cust_wb, cache.cust_email_start_col)
 
     from nouki_kaitou.gui import SelectionDialog
 
@@ -674,7 +675,9 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
     # 顧客マスターのメールアドレスチェック（警告のみ）
     if args.email_mode != "none":
         cust_ws = cust_wb["顧客マスター"]
-        missing = check_customer_master(customer_names, cust_ws)
+        missing = check_customer_master(
+            customer_names, cust_ws, cache.cust_email_start_col
+        )
         if missing:
             print("警告: 以下の顧客はメールアドレスが未登録です:")
             print(missing)

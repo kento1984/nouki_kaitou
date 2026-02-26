@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime
 from typing import TYPE_CHECKING, Optional
 
-from nouki_kaitou.models import CacheStore, ColumnMap
+from nouki_kaitou.models import CacheStore, ColumnMap, DeliveryPattern
 from nouki_kaitou.utils import parse_date
 
 if TYPE_CHECKING:
@@ -90,33 +90,63 @@ def build_manufacturer_cache(
 
 
 # ============================================
+# 顧客マスターのフォーマット検出
+# ============================================
+def _detect_customer_master_format(ws: object) -> bool:
+    """顧客マスターが新フォーマット（E列=配送パターン）かどうかを検出する。
+
+    E列（0-indexed: 4）の最初の非空データセルを調べて判断する。
+    - ``@`` を含む → 旧フォーマット（E列=メールアドレス）
+    - ``@`` を含まない → 新フォーマット（E列=配送パターン名）
+    - E列が全て空 → 旧フォーマット（安全デフォルト）
+
+    Returns:
+        True = 新フォーマット（E列が配送パターン列）
+    """
+    for row in ws.iter_rows(min_row=2, max_col=5, values_only=True):
+        if len(row) < 5:
+            continue
+        val = str(row[4]).strip() if row[4] else ""
+        if val:
+            return "@" not in val
+    return False
+
+
+# ============================================
 # VBA: BuildCustomerCache (L827-859)
 # 顧客マスターから配送曜日・保持日数・路線便キャッシュ
 # ============================================
 def build_customer_cache(
     customer_master_wb: object,
-) -> tuple[dict[str, list[int]], dict[str, int], dict[str, bool]]:
-    """顧客マスターシートから配送曜日・保持日数・路線便キャッシュを構築する。
+) -> tuple[dict[str, list[int]], dict[str, int], dict[str, bool], dict[str, str]]:
+    """顧客マスターシートから配送曜日・保持日数・路線便・配送パターンキャッシュを構築する。
 
-    顧客マスターシートの構造:
+    顧客マスターシートの構造（旧フォーマット: A-D列+E列以降メール）:
     - A列: 顧客名 (キー)
     - B列: 出荷曜日 ("月水金"等)
     - C列: 保持日数 (数値)
     - D列: 路線便 (空欄以外=True)
 
+    新フォーマット（E列=配送パターン名、F列以降メール）:
+    - E列: 配送パターン名（"近隣2便", "遠方午前" 等）
+
     Returns:
-        (cust_days辞書, cust_retention辞書, cust_route辞書)
+        (cust_days辞書, cust_retention辞書, cust_route辞書, cust_pattern辞書)
     """
     cust_days: dict[str, list[int]] = {}
     cust_retention: dict[str, int] = {}
     cust_route: dict[str, bool] = {}
+    cust_pattern: dict[str, str] = {}
 
     try:
         ws = customer_master_wb["顧客マスター"]
     except KeyError:
-        return cust_days, cust_retention, cust_route
+        return cust_days, cust_retention, cust_route, cust_pattern
 
-    for row in ws.iter_rows(min_row=2, max_col=4, values_only=True):
+    has_pattern = _detect_customer_master_format(ws)
+    max_col = 5 if has_pattern else 4
+
+    for row in ws.iter_rows(min_row=2, max_col=max_col, values_only=True):
         key = str(row[0]).strip() if row[0] else ""
         if not key or key in cust_days:
             continue
@@ -143,7 +173,89 @@ def build_customer_cache(
         route_val = str(row[3]).strip() if (len(row) > 3 and row[3]) else ""
         cust_route[key] = route_val != ""
 
-    return cust_days, cust_retention, cust_route
+        # E列: 配送パターン（新フォーマットのみ）
+        if has_pattern and len(row) > 4:
+            pattern_val = str(row[4]).strip() if row[4] else ""
+            if pattern_val:
+                cust_pattern[key] = pattern_val
+
+    return cust_days, cust_retention, cust_route, cust_pattern
+
+
+# ============================================
+# 配送パターンキャッシュ
+# ============================================
+_DAYS_LABEL_MAP: dict[str, int] = {
+    "当日": 0,
+    "翌日": 1,
+    "翌々日": 2,
+}
+
+
+def _parse_time_str(text: str) -> tuple[int, int] | None:
+    """'HH:MM'形式の文字列を(hour, minute)タプルに変換する。"""
+    if not text:
+        return None
+    parts = str(text).strip().split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except (ValueError, TypeError):
+        return None
+
+
+def build_pattern_cache(
+    manufacturer_master_wb: object,
+) -> dict[str, DeliveryPattern]:
+    """メーカー一覧.xlsx「配送パターン」シートからパターン定義を構築する。
+
+    シート構造:
+    - A列: パターン名 (例: "近隣2便")
+    - B列: cutoff1 (例: "11:30")
+    - C列: cutoff1前の日数ラベル (例: "当日")
+    - D列: cutoff2 (例: "16:00", 空欄なら1段階)
+    - E列: cutoff2前の日数ラベル (例: "翌日")
+
+    Returns:
+        {パターン名: DeliveryPattern}。シートなしなら空dict。
+    """
+    patterns: dict[str, DeliveryPattern] = {}
+
+    try:
+        ws = manufacturer_master_wb["配送パターン"]
+    except KeyError:
+        return patterns
+
+    for row in ws.iter_rows(min_row=2, max_col=5, values_only=True):
+        name = str(row[0]).strip() if row[0] else ""
+        if not name or name in patterns:
+            continue
+
+        cutoff1 = _parse_time_str(row[1]) if len(row) > 1 else None
+        if cutoff1 is None:
+            continue
+
+        days_before = _DAYS_LABEL_MAP.get(
+            str(row[2]).strip() if (len(row) > 2 and row[2]) else "", 0
+        )
+
+        cutoff2 = None
+        days_between = 1
+        if len(row) > 3 and row[3]:
+            cutoff2 = _parse_time_str(row[3])
+        if cutoff2 is not None and len(row) > 4 and row[4]:
+            days_between = _DAYS_LABEL_MAP.get(str(row[4]).strip(), 1)
+
+        patterns[name] = DeliveryPattern(
+            name=name,
+            cutoff1=cutoff1,
+            days_before_cutoff1=days_before,
+            cutoff2=cutoff2,
+            days_between_cutoffs=days_between,
+        )
+
+    return patterns
 
 
 # ============================================
@@ -271,11 +383,20 @@ def build_all_caches(
         store.mfg_name, store.mfg_days = build_manufacturer_cache(
             manufacturer_master_wb
         )
+        store.delivery_patterns = build_pattern_cache(manufacturer_master_wb)
 
     if customer_master_wb is not None:
-        store.cust_days, store.cust_retention, store.cust_route = (
-            build_customer_cache(customer_master_wb)
-        )
+        (
+            store.cust_days,
+            store.cust_retention,
+            store.cust_route,
+            store.cust_pattern,
+        ) = build_customer_cache(customer_master_wb)
+        # フォーマット検出: cust_patternが1件でもあれば新フォーマット
+        if store.cust_pattern:
+            store.cust_email_start_col = 5
+        else:
+            store.cust_email_start_col = 4
 
     if confirming_ws is not None:
         store.confirm = build_confirming_cache(confirming_ws)

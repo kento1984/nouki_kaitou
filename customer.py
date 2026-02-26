@@ -97,6 +97,22 @@ def get_retention_days(
 # VBA: IsRouteDelivery (L7495-7522)
 # 路線便フラグ判定
 # ============================================
+def get_customer_pattern(
+    customer_name: str,
+    cache: CacheStore,
+) -> str:
+    """顧客の配送パターン名を取得する。
+
+    Args:
+        customer_name: 顧客名
+        cache: キャッシュストア
+
+    Returns:
+        パターン名（未設定なら空文字）
+    """
+    return cache.cust_pattern.get(customer_name, "")
+
+
 def is_route_delivery(
     customer_name: str,
     cache: CacheStore,
@@ -123,14 +139,16 @@ def is_route_delivery(
 def get_email_addresses(
     customer_name: str,
     customer_master_ws: object,
+    email_start_col: int = 4,
 ) -> str:
     """顧客マスターからメールアドレスを取得する。
 
-    顧客マスターのE列以降にあるメールアドレスを「; 」区切りで返す。
+    顧客マスターのメール開始列以降にあるメールアドレスを「; 」区切りで返す。
 
     Args:
         customer_name: 顧客名
         customer_master_ws: 顧客マスターシート
+        email_start_col: メール開始列（0-indexed。旧フォーマット:4, 新フォーマット:5）
 
     Returns:
         メールアドレス（「; 」区切り）。見つからなければ空文字。
@@ -143,9 +161,8 @@ def get_email_addresses(
         if name != customer_name:
             continue
 
-        # E列（0-indexed: 4）以降のメールアドレスを収集
         emails: list[str] = []
-        for j in range(4, len(row)):
+        for j in range(email_start_col, len(row)):
             addr = str(row[j]).strip() if row[j] else ""
             if addr:
                 emails.append(addr)
@@ -162,6 +179,7 @@ def get_email_addresses(
 def check_customer_master(
     customer_names: list[str],
     customer_master_ws: object,
+    email_start_col: int = 4,
 ) -> str:
     """顧客のメールアドレス未登録をチェックする。
 
@@ -170,6 +188,7 @@ def check_customer_master(
     Args:
         customer_names: チェック対象の顧客名リスト
         customer_master_ws: 顧客マスターシート
+        email_start_col: メール開始列（0-indexed。旧フォーマット:4, 新フォーマット:5）
 
     Returns:
         未登録顧客のリスト文字列（「・顧客名」形式、改行区切り）。
@@ -187,8 +206,7 @@ def check_customer_master(
             continue
 
         has_email = False
-        # E列（0-indexed: 4）以降
-        for j in range(4, len(row)):
+        for j in range(email_start_col, len(row)):
             if row[j] and str(row[j]).strip():
                 has_email = True
                 break

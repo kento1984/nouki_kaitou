@@ -266,8 +266,9 @@ def create_emails(
                 customer_name, rep_name, rep_master_ws
             )
         else:
+            email_col = cache.cust_email_start_col if cache else 4
             mail_addresses = get_email_addresses(
-                customer_name, customer_master_ws
+                customer_name, customer_master_ws, email_col
             )
 
         if not mail_addresses:

@@ -12,6 +12,30 @@ from typing import Optional
 
 
 # ============================================
+# 配送パターン（仙台営業所等のマルチ便対応）
+# ============================================
+@dataclass
+class DeliveryPattern:
+    """配送パターン定義（メーカー一覧「配送パターン」シートから読込）
+
+    1段階（cutoff2=None）: cutoff1で2択（before/after）
+    2段階（cutoff2あり）: cutoff1/cutoff2で3択
+    """
+
+    name: str = ""
+    cutoff1: tuple[int, int] = (15, 0)
+    days_before_cutoff1: int = 0
+    cutoff2: tuple[int, int] | None = None
+    days_between_cutoffs: int = 1
+
+    @property
+    def days_after_all(self) -> int:
+        if self.cutoff2 is not None:
+            return self.days_between_cutoffs
+        return self.days_before_cutoff1 + 1
+
+
+# ============================================
 # 営業所設定（VBA: g_BranchName等のグローバル変数群）
 # ============================================
 @dataclass
@@ -74,6 +98,18 @@ class CacheStore:
         default_factory=dict
     )
     """注番|明細 → (問合せ状況, ステータス, 受注納期)"""
+
+    # 顧客マスターから構築（配送パターン）
+    cust_pattern: dict[str, str] = field(default_factory=dict)
+    """顧客名 → 配送パターン名"""
+
+    # メーカー一覧「配送パターン」シートから構築
+    delivery_patterns: dict[str, DeliveryPattern] = field(default_factory=dict)
+    """パターン名 → DeliveryPattern定義"""
+
+    # 顧客マスターのフォーマット検出結果
+    cust_email_start_col: int = 4
+    """メールアドレス開始列（旧:4, 新:5）"""
 
     # 受注一覧から構築
     storage: dict[str, str] = field(default_factory=dict)

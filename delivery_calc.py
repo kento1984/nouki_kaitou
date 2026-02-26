@@ -31,6 +31,10 @@ from nouki_kaitou.models import (
     HolidayMap,
     OrderRow,
 )
+from nouki_kaitou.sendai_delivery import (
+    check_sendai_himozuki_completed,
+    check_sendai_stock_completed,
+)
 from nouki_kaitou.stockout import get_storage_place_from_same_order
 from nouki_kaitou.utils import (
     convert_to_half_width,
@@ -309,7 +313,17 @@ def calculate_delivery_date(
         return result
 
     # ============================================
-    # 5. 在庫販売 + 処理完了
+    # 5a. 仙台営業所 在庫販売+処理完了（パターンベース）
+    # ============================================
+    result = check_sendai_stock_completed(
+        row, cache, holidays, branch, today,
+        storage_place, use_ship_rule,
+    )
+    if result is not None:
+        return result
+
+    # ============================================
+    # 5b. 在庫販売 + 処理完了（既存ロジック、変更なし）
     # ============================================
     result = _check_stock_completed(
         row, cache, holidays, branch, today,
@@ -319,7 +333,17 @@ def calculate_delivery_date(
         return result
 
     # ============================================
-    # 6. 紐付き + 処理完了
+    # 6a. 仙台営業所 紐付き+処理完了（パターンベース）
+    # ============================================
+    result = check_sendai_himozuki_completed(
+        row, cache, holidays, branch, execution_time, today,
+        storage_place, is_rosenbin,
+    )
+    if result is not None:
+        return result
+
+    # ============================================
+    # 6b. 紐付き + 処理完了（既存ロジック、変更なし）
     # ============================================
     result = _check_himozuki_completed(
         row, cache, holidays, branch, execution_time, today,

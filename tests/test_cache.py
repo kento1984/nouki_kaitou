@@ -6,14 +6,16 @@ from typing import Optional
 import pytest
 
 from nouki_kaitou.cache import (
+    _detect_customer_master_format,
     _parse_weekday_string,
     build_all_caches,
     build_confirming_cache,
     build_customer_cache,
     build_manufacturer_cache,
+    build_pattern_cache,
     build_storage_cache,
 )
-from nouki_kaitou.models import CacheStore
+from nouki_kaitou.models import CacheStore, DeliveryPattern
 
 
 # ============================================
@@ -156,7 +158,7 @@ class TestBuildCustomerCache:
         ws = MockWorksheet(data)
         wb = MockWorkbook({"顧客マスター": ws})
 
-        cust_days, cust_retention, cust_route = build_customer_cache(wb)
+        cust_days, cust_retention, cust_route, cust_pattern = build_customer_cache(wb)
 
         # 配送曜日
         assert cust_days["岡安産業（株）　千葉営業所"] == [2, 4, 6]  # 月水金
@@ -173,11 +175,15 @@ class TestBuildCustomerCache:
         assert cust_route["共同ガス（株）　本社"] is True
         assert cust_route["コイケ酸商（株）　白井営業所"] is False
 
+        # パターン（旧フォーマットなので空）
+        assert cust_pattern == {}
+
     def test_missing_sheet(self):
         """シートが存在しない場合"""
         wb = MockWorkbook({})
-        cust_days, cust_retention, cust_route = build_customer_cache(wb)
+        cust_days, cust_retention, cust_route, cust_pattern = build_customer_cache(wb)
         assert cust_days == {}
+        assert cust_pattern == {}
 
     def test_empty_customer_skipped(self):
         """顧客名が空の行はスキップ"""
@@ -189,7 +195,7 @@ class TestBuildCustomerCache:
         ws = MockWorksheet(data)
         wb = MockWorkbook({"顧客マスター": ws})
 
-        cust_days, _, _ = build_customer_cache(wb)
+        cust_days, _, _, _ = build_customer_cache(wb)
         assert len(cust_days) == 1
         assert "テスト顧客" in cust_days
 
@@ -203,10 +209,26 @@ class TestBuildCustomerCache:
         ws = MockWorksheet(data)
         wb = MockWorkbook({"顧客マスター": ws})
 
-        cust_days, cust_retention, cust_route = build_customer_cache(wb)
+        cust_days, cust_retention, cust_route, _ = build_customer_cache(wb)
         assert cust_days["テスト顧客"] == [2, 4, 6]  # 最初の値
         assert cust_retention["テスト顧客"] == 2
         assert cust_route["テスト顧客"] is False
+
+    def test_new_format_with_pattern(self):
+        """新フォーマット（E列=配送パターン）の読み込み"""
+        data = [
+            ["顧客名", "出荷曜日", "保持日数", "路線便", "配送パターン"],
+            ["顧客A", "月水金", 0, "", "近隣2便"],
+            ["顧客B", "", 0, "○", "遠方午前"],
+            ["顧客C", "", 0, "", ""],  # パターンなし
+        ]
+        ws = MockWorksheet(data)
+        wb = MockWorkbook({"顧客マスター": ws})
+
+        _, _, _, cust_pattern = build_customer_cache(wb)
+        assert cust_pattern["顧客A"] == "近隣2便"
+        assert cust_pattern["顧客B"] == "遠方午前"
+        assert "顧客C" not in cust_pattern
 
 
 # ============================================
@@ -401,3 +423,104 @@ class TestBuildAllCaches:
         assert store.cust_days["テスト顧客"] == [2, 4, 6]
         assert "GL2Z444462|10" in store.confirm
         assert store.storage["GL2Z444369"] == "転送中（直送用）"
+        assert store.cust_email_start_col == 4  # 旧フォーマット
+
+
+# ============================================
+# build_pattern_cache
+# ============================================
+class TestBuildPatternCache:
+    def test_normal(self):
+        """配送パターンの読み込み"""
+        data = [
+            ["パターン名", "cutoff1", "cutoff1前", "cutoff2", "cutoff2前"],
+            ["近隣2便", "11:30", "当日", "16:00", "翌日"],
+            ["遠方午前", "16:00", "翌日", None, None],
+            ["遠方午後", "11:30", "当日", None, None],
+        ]
+        ws = MockWorksheet(data)
+        wb = MockWorkbook({"配送パターン": ws})
+
+        patterns = build_pattern_cache(wb)
+
+        assert len(patterns) == 3
+
+        kinrin = patterns["近隣2便"]
+        assert kinrin.cutoff1 == (11, 30)
+        assert kinrin.days_before_cutoff1 == 0
+        assert kinrin.cutoff2 == (16, 0)
+        assert kinrin.days_between_cutoffs == 1
+        assert kinrin.days_after_all == 1
+
+        enpo_am = patterns["遠方午前"]
+        assert enpo_am.cutoff1 == (16, 0)
+        assert enpo_am.days_before_cutoff1 == 1
+        assert enpo_am.cutoff2 is None
+        assert enpo_am.days_after_all == 2
+
+        enpo_pm = patterns["遠方午後"]
+        assert enpo_pm.cutoff1 == (11, 30)
+        assert enpo_pm.days_before_cutoff1 == 0
+        assert enpo_pm.cutoff2 is None
+        assert enpo_pm.days_after_all == 1
+
+    def test_missing_sheet(self):
+        """シートが存在しない場合→空dict"""
+        wb = MockWorkbook({})
+        patterns = build_pattern_cache(wb)
+        assert patterns == {}
+
+    def test_invalid_cutoff(self):
+        """cutoff1が不正な場合→スキップ"""
+        data = [
+            ["パターン名", "cutoff1", "cutoff1前", "cutoff2", "cutoff2前"],
+            ["不正パターン", "abc", "当日", None, None],
+            ["正常パターン", "11:30", "当日", None, None],
+        ]
+        ws = MockWorksheet(data)
+        wb = MockWorkbook({"配送パターン": ws})
+
+        patterns = build_pattern_cache(wb)
+        assert len(patterns) == 1
+        assert "正常パターン" in patterns
+
+
+# ============================================
+# _detect_customer_master_format
+# ============================================
+class TestDetectCustomerMasterFormat:
+    def test_old_format_email(self):
+        """旧フォーマット: E列にメールアドレス"""
+        data = [
+            ["顧客名", "出荷曜日", "保持日数", "路線便", "メール"],
+            ["顧客A", "月水金", 0, "", "user@example.com"],
+        ]
+        ws = MockWorksheet(data)
+        assert _detect_customer_master_format(ws) is False
+
+    def test_new_format_pattern(self):
+        """新フォーマット: E列に配送パターン名"""
+        data = [
+            ["顧客名", "出荷曜日", "保持日数", "路線便", "配送パターン"],
+            ["顧客A", "月水金", 0, "", "近隣2便"],
+        ]
+        ws = MockWorksheet(data)
+        assert _detect_customer_master_format(ws) is True
+
+    def test_empty_e_column(self):
+        """E列が全て空→旧フォーマット（安全デフォルト）"""
+        data = [
+            ["顧客名", "出荷曜日", "保持日数", "路線便", ""],
+            ["顧客A", "月水金", 0, "", ""],
+        ]
+        ws = MockWorksheet(data)
+        assert _detect_customer_master_format(ws) is False
+
+    def test_short_row(self):
+        """E列がない短い行→旧フォーマット"""
+        data = [
+            ["顧客名", "出荷曜日", "保持日数", "路線便"],
+            ["顧客A", "月水金", 0, ""],
+        ]
+        ws = MockWorksheet(data)
+        assert _detect_customer_master_format(ws) is False
