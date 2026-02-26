@@ -266,13 +266,13 @@ class TestCopyDataRow:
         copy_data_row(ws, 7, row, external_comment="納品書同封")
         assert ws.cell(row=7, column=12).value == "納品書同封"
 
-    def test_empty_external_comment_falls_back(self):
-        """external_comment空文字 → 注番が出力される"""
+    def test_empty_external_comment_outputs_empty(self):
+        """external_comment空文字 → 空文字が出力される（注番にフォールバックしない）"""
         wb = Workbook()
         ws = wb.active
         row = self._make_row(order_number="12345-10")
         copy_data_row(ws, 7, row, external_comment="")
-        assert ws.cell(row=7, column=12).value == "12345-10"
+        assert ws.cell(row=7, column=12).value == ""
 
     def test_no_external_comment_default(self):
         """external_comment省略 → 注番が出力される"""

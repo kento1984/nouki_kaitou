@@ -281,7 +281,7 @@ def copy_data_row(
     ws: Worksheet,
     target_row: int,
     report_row: ReportRow,
-    external_comment: str = "",
+    external_comment: str | None = None,
 ) -> None:
     """レポート行をExcelシートに書き込む。
 
@@ -292,7 +292,8 @@ def copy_data_row(
         ws: 対象ワークシート
         target_row: 書き込み先行番号（7〜）
         report_row: 書き込みデータ
-        external_comment: L列に表示する社外コメント（remarks_mode=external時のみ使用）
+        external_comment: L列に表示する社外コメント。
+            None=注番を表示（デフォルト）、str=社外コメントを表示（空文字含む）
     """
     ws.cell(row=target_row, column=1).value = report_row.registration_date
     ws.cell(row=target_row, column=2).value = report_row.customer_contact
@@ -309,9 +310,9 @@ def copy_data_row(
     ws.cell(row=target_row, column=9).value = report_row.delivery_answer
     ws.cell(row=target_row, column=10).value = report_row.delivery_place
     ws.cell(row=target_row, column=11).value = report_row.remarks
-    # L列: remarks_mode=external なら社外コメント、それ以外は注番
+    # L列: external_commentがNone以外なら社外コメント、Noneなら注番
     ws.cell(row=target_row, column=12).value = (
-        external_comment if external_comment else report_row.order_number
+        external_comment if external_comment is not None else report_row.order_number
     )
 
     # 偶数行は薄いブルー

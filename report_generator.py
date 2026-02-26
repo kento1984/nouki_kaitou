@@ -285,9 +285,10 @@ def create_delivery_report_by_order_numbers(
         report_row, delivery_status = build_report_row(
             row, cache, holidays, branch, execution_time, False, today
         )
-        ext_comment = ""
-        if is_external_mode and row.comment_external.strip():
-            ext_comment = clean_external_comment(row.comment_external)
+        ext_comment = None
+        if is_external_mode:
+            raw = row.comment_external.strip()
+            ext_comment = clean_external_comment(raw) if raw else ""
         copy_data_row(ws, current_row, report_row, ext_comment)
 
         # --- 情報収集 ---
@@ -470,9 +471,10 @@ def create_delivery_report(
             delivery_status = "納品済み"
             report_row.delivery_answer = "納品済み"
 
-        ext_comment = ""
-        if is_external_mode and row.comment_external.strip():
-            ext_comment = clean_external_comment(row.comment_external)
+        ext_comment = None
+        if is_external_mode:
+            raw = row.comment_external.strip()
+            ext_comment = clean_external_comment(raw) if raw else ""
         copy_data_row(ws, current_row, report_row, ext_comment)
 
         # --- メーカー名・品名を解決（情報収集用） ---

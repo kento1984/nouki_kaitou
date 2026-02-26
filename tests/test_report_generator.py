@@ -916,7 +916,7 @@ class TestRemarksMode:
         assert "納品書同封" in str(val)
 
     def test_external_mode_tracking_only_empty(self, tmp_path):
-        """社外コメントが送り状番号のみ → L列は空文字でなく注番フォールバック"""
+        """社外コメントが送り状番号のみ → クリーニング後空文字 → L列は空文字"""
         branch = BranchSettings(
             name="松本営業所", default_cutoff=15, remarks_mode="external",
         )
@@ -929,8 +929,9 @@ class TestRemarksMode:
         assert result is not None
         wb = load_workbook(result.file_path)
         ws = wb.active
-        # クリーニング結果が空 → external_comment="" → 注番にフォールバック
-        assert ws.cell(row=7, column=12).value == "100"
+        # クリーニング結果が空 → external_comment="" → 空セル（注番にフォールバックしない）
+        # openpyxlは保存→再読み込みで空文字をNoneに変換する
+        assert ws.cell(row=7, column=12).value is None
 
     def test_detail_mode_l_column_unchanged(self, tmp_path):
         """remarks_mode=detail → L列は注番のまま"""
