@@ -301,3 +301,24 @@ class TestCleanExternalComment:
         """ヤマト送り状+メッセージ"""
         result = clean_external_comment("ヤマト 1234567890123 2/25着指定")
         assert result == "2/25着指定"
+
+    def test_full_name_fullwidth_digits(self):
+        """正式名称+全角数字+全角ハイフン → 空文字"""
+        assert clean_external_comment("佐川急便１９８６－５５５７－６３４６") == ""
+
+    def test_full_name_fullwidth_with_message(self):
+        """正式名称+全角数字+メッセージ → メッセージのみ残る"""
+        result = clean_external_comment("ヤマト運輸１２３４－５６７８－９０１２ 納品書同封")
+        assert result == "納品書同封"
+
+    def test_mixed_width_digits(self):
+        """全角半角混在の送り状番号"""
+        assert clean_external_comment("佐川急便1986－５５５７-6346") == ""
+
+    def test_full_name_no_separator(self):
+        """正式名称と番号の間に区切りなし"""
+        assert clean_external_comment("西濃運輸1234567890") == ""
+
+    def test_full_name_with_colon(self):
+        """正式名称+コロン+番号"""
+        assert clean_external_comment("福山通運：1234567890") == ""

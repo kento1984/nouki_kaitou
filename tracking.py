@@ -227,9 +227,15 @@ def can_direct_track(carrier_name: str) -> bool:
 # 社外コメントから送り状・引取テキストを除去
 # ============================================
 
-# 送り状パターン: キーワード + (コロン/スペース) + 数字列（ハイフン含む）
+# 送り状パターン: キーワード（略称+正式名称） + (コロン/スペース) + 数字列（ハイフン含む）
+# 正式名称（「佐川急便」等）も含め、最長一致で並べて部分マッチ失敗を防ぐ
+_CLEAN_CARRIER_KEYWORDS = sorted(
+    set(_CARRIER_KEYWORDS) | set(_CARRIER_FULL_NAMES.values()),
+    key=len,
+    reverse=True,
+)
 _TRACKING_PATTERN = re.compile(
-    r"(?:" + "|".join(re.escape(k) for k in _CARRIER_KEYWORDS) + r")"
+    r"(?:" + "|".join(re.escape(k) for k in _CLEAN_CARRIER_KEYWORDS) + r")"
     r"[\s:：]*"
     r"[\d０-９\-－]+"
 )
