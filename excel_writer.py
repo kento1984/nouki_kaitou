@@ -29,7 +29,6 @@ from nouki_kaitou.models import (
     BunnoEntry,
     CacheStore,
     HolidayMap,
-    OrderRow,
     ReportRow,
     StockoutEntry,
     TrackingEntry,

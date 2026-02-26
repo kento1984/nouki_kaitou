@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from nouki_kaitou.models import CacheStore, ColumnMap
+from nouki_kaitou.models import CacheStore
 from nouki_kaitou.utils import convert_to_half_width
 
 

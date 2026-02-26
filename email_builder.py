@@ -24,6 +24,7 @@ from nouki_kaitou.models import (
     StockoutEntry,
     TrackingEntry,
 )
+from nouki_kaitou.representative import get_rep_email_addresses
 
 
 # ============================================
@@ -72,53 +73,6 @@ def html_escape(text: str) -> str:
     """
     return html.escape(text, quote=True)
 
-
-# ============================================
-# VBA: GetRepEmailAddresses (L7673-7711)
-# 担当者マスターからメアド取得
-# ============================================
-def get_rep_email_addresses(
-    customer_name: str,
-    rep_name: str,
-    rep_master_ws: object,
-) -> str:
-    """担当者マスターからメールアドレスを取得する。
-
-    担当者マスターシートのA列=顧客名、B列=担当者名（末尾の「様」除去）
-    に一致する行のC列以降のメールアドレスを「; 」区切りで返す。
-
-    Args:
-        customer_name: 顧客名
-        rep_name: 担当者名
-        rep_master_ws: 担当者マスターシート
-
-    Returns:
-        メールアドレス（「; 」区切り）。見つからなければ空文字。
-    """
-    if rep_master_ws is None:
-        return ""
-
-    for row in rep_master_ws.iter_rows(min_row=2, values_only=True):
-        name = str(row[0]).strip() if row[0] else ""
-        master_rep = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-
-        # 末尾の「様」を除去して比較
-        if master_rep.endswith("様"):
-            master_rep = master_rep[:-1]
-
-        if name != customer_name or master_rep != rep_name:
-            continue
-
-        # C列（0-indexed: 2）以降のメールアドレスを収集
-        emails: list[str] = []
-        for j in range(2, len(row)):
-            addr = str(row[j]).strip() if row[j] else ""
-            if addr:
-                emails.append(addr)
-
-        return "; ".join(emails)
-
-    return ""
 
 
 # ============================================

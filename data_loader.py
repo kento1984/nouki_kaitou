@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from nouki_kaitou.models import ColumnMap, OrderRow
-from nouki_kaitou.utils import parse_date, parse_time
+from nouki_kaitou.utils import parse_date
 
 
 # ============================================

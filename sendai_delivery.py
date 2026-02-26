@@ -19,7 +19,6 @@ from nouki_kaitou.business_days import (
     get_next_delivery_day,
     is_holiday,
 )
-from nouki_kaitou.config import get_branch_settings
 from nouki_kaitou.customer import get_customer_delivery_days, get_customer_pattern
 from nouki_kaitou.models import (
     BranchSettings,
