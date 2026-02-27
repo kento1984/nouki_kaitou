@@ -22,6 +22,7 @@ import pickle
 import sys
 import time
 import unicodedata
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -447,7 +448,9 @@ def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
         print("エラー: 顧客マスター_v2.xlsmが使用中です。")
         print("  顧客マスター_v2.xlsmを閉じてから再実行してください。")
         sys.exit(1)
+    warnings.filterwarnings('ignore', message='Data Validation extension', category=UserWarning)
     cust_wb = load_workbook(str(cust_found), data_only=True)
+    warnings.resetwarnings()
 
     # キャッシュ構築（master_customers用。confirming_wsはGUIに不要なのでNone）
     cache = build_all_caches(mfg_wb, cust_wb, None, source_data_raw, cols)
@@ -545,7 +548,9 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
             print("エラー: 顧客マスター_v2.xlsmが使用中です。")
             print("  顧客マスター_v2.xlsmを閉じてから再実行してください。")
             sys.exit(1)
+        warnings.filterwarnings('ignore', message='Data Validation extension', category=UserWarning)
         cust_wb = load_workbook(str(cust_found), data_only=True)
+        warnings.resetwarnings()
 
         branch = load_branch_settings(mfg_wb, source_data_raw, cols) if mfg_wb is not None else BranchSettings()
 
