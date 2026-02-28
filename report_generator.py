@@ -884,24 +884,8 @@ def _classify_order(
         if "分納" in delivery_status or prev_confirming_status == "分納":
             if has_bunno_mitei(bunno_info, cache, row.order_number, row.detail_number):
                 ship_status_for_confirm = "分納"
-            elif prev_confirming_status == "分納":
-                # 分納で確認中一覧に残っている → 全分確定か再判定
-                if has_bunno_mitei(bunno_info, cache, row.order_number, row.detail_number):
-                    ship_status_for_confirm = "分納"
-                else:
-                    # 全分確定 → 送付履歴へ
-                    confirmed_orders.append(HistoryRecord(
-                        order_date=row.registration_date,
-                        customer_name=row.customer_name,
-                        order_number=row.order_number,
-                        detail_number=row.detail_number,
-                        manufacturer_name=manufacturer_name,
-                        product_name=product_name,
-                        delivery_answer="分納完了",
-                    ))
-                    return
             else:
-                # 新規で未定なし → 送付履歴へ
+                # 未定なし（全分確定 or 新規で未定なし）→ 送付履歴へ
                 confirmed_orders.append(HistoryRecord(
                     order_date=row.registration_date,
                     customer_name=row.customer_name,
