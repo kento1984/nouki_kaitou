@@ -556,281 +556,287 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
 
     print(f"ツールフォルダ: {tool_folder}")
 
-    # 担当者マスターシート読み込み（シートが存在しない場合はNone → 担当者分割なし）
     try:
-        rep_master_ws = cust_wb["担当者マスター"]
-    except KeyError:
-        rep_master_ws = None
 
-    history_found = _find_file_in_dir(tool_folder, "送付履歴.xlsx")
-    history_path = history_found if history_found else tool_folder / "送付履歴.xlsx"
-    history_exists = history_found is not None
+        # 担当者マスターシート読み込み（シートが存在しない場合はNone → 担当者分割なし）
+        try:
+            rep_master_ws = cust_wb["担当者マスター"]
+        except KeyError:
+            rep_master_ws = None
 
-    # 送付履歴ファイルの排他チェック（他のプロセスで使用中なら中断）
-    if history_exists and is_file_open(str(history_path)):
-        print("エラー: 送付履歴ファイルが使用中です。")
-        print("  他の人が作業中のため実行できません。")
-        print(f"  ファイル: {history_path}")
-        print("  使用中の人に声をかけて閉じてもらってから再実行してください。")
-        sys.exit(1)
+        history_found = _find_file_in_dir(tool_folder, "送付履歴.xlsx")
+        history_path = history_found if history_found else tool_folder / "送付履歴.xlsx"
+        history_exists = history_found is not None
 
-    t_history_load = time.perf_counter()
-    if history_exists:
-        # read_only=True で高速読み込み（書き込みは後で別途ロード）
-        history_wb_ro = load_workbook(str(history_found), read_only=True)
-    else:
-        print("送付履歴ファイルを新規作成します。")
-        history_wb_ro = initialize_delivery_history(str(history_path))
+        # 送付履歴ファイルの排他チェック（他のプロセスで使用中なら中断）
+        if history_exists and is_file_open(str(history_path)):
+            print("エラー: 送付履歴ファイルが使用中です。")
+            print("  他の人が作業中のため実行できません。")
+            print(f"  ファイル: {history_path}")
+            print("  使用中の人に声をかけて閉じてもらってから再実行してください。")
+            sys.exit(1)
 
-    # --- 4. キャッシュ構築 ---
-    # confirming_wsを含めた完全なキャッシュを構築（GUI時はconfirming_ws=Noneだったため再構築）
-    ws_confirming_ro = history_wb_ro[CONFIRMING_SHEET_NAME]
-    cache = build_all_caches(mfg_wb, cust_wb, ws_confirming_ro, source_data_raw, cols)
-    holidays = load_holidays(mfg_wb) if mfg_wb is not None else {}
+        t_history_load = time.perf_counter()
+        if history_exists:
+            # read_only=True で高速読み込み（書き込みは後で別途ロード）
+            history_wb_ro = load_workbook(str(history_found), read_only=True)
+        else:
+            print("送付履歴ファイルを新規作成します。")
+            history_wb_ro = initialize_delivery_history(str(history_path))
 
-    t_data_ready = time.perf_counter()
-    print(f"営業所: {branch.name}")
-    print(f"データ読み込み: {t_data_ready - t_run_start:.2f}s（うち送付履歴: {t_data_ready - t_history_load:.2f}s）")
+        # --- 4-5. キャッシュ構築・送付履歴読み込み ---
+        try:
+            ws_confirming_ro = history_wb_ro[CONFIRMING_SHEET_NAME]
+            cache = build_all_caches(mfg_wb, cust_wb, ws_confirming_ro, source_data_raw, cols)
+            holidays = load_holidays(mfg_wb) if mfg_wb is not None else {}
 
-    # --- 5. 送付履歴読み込み（pickleキャッシュ付き） ---
-    ws_history_ro = history_wb_ro[HISTORY_SHEET_NAME]
-    t0 = time.perf_counter()
-    sent_orders = _load_sent_orders_cached(
-        history_path, ws_history_ro, ws_confirming_ro, cache, holidays
-    )
-    history_elapsed = time.perf_counter() - t0
-    print(f"送付済み伝票: {len(sent_orders)}件 ({history_elapsed:.2f}s)")
+            t_data_ready = time.perf_counter()
+            print(f"営業所: {branch.name}")
+            print(f"データ読み込み: {t_data_ready - t_run_start:.2f}s（うち送付履歴: {t_data_ready - t_history_load:.2f}s）")
 
-    # 送付履歴の行データをメモリに保持（後のバッチ書き込みで使用）
-    history_rows = extract_sheet_rows(ws_history_ro, 9)
-    confirming_rows = extract_sheet_rows(ws_confirming_ro, 11)
+            # 送付履歴読み込み（pickleキャッシュ付き）
+            ws_history_ro = history_wb_ro[HISTORY_SHEET_NAME]
+            t0 = time.perf_counter()
+            sent_orders = _load_sent_orders_cached(
+                history_path, ws_history_ro, ws_confirming_ro, cache, holidays
+            )
+            history_elapsed = time.perf_counter() - t0
+            print(f"送付済み伝票: {len(sent_orders)}件 ({history_elapsed:.2f}s)")
 
-    # read_onlyワークブックを閉じる
-    if history_exists:
-        history_wb_ro.close()
+            # 送付履歴の行データをメモリに保持（後のバッチ書き込みで使用）
+            history_rows = extract_sheet_rows(ws_history_ro, 9)
+            confirming_rows = extract_sheet_rows(ws_confirming_ro, 11)
+        finally:
+            # read_onlyワークブックを閉じる（例外発生時も確実にクローズ）
+            history_wb_ro.close()
 
-    # --- 6. モード判定・期間パース ---
-    order_numbers_mode = getattr(args, "order_numbers", None)
+        # --- 6. モード判定・期間パース ---
+        order_numbers_mode = getattr(args, "order_numbers", None)
 
-    date_from: Optional[datetime.date] = None
-    date_to: Optional[datetime.date] = None
-    if not order_numbers_mode:
-        if args.date_from:
-            date_from = _parse_date_arg(args.date_from)
-        if args.date_to:
-            date_to = _parse_date_arg(args.date_to)
+        date_from: Optional[datetime.date] = None
+        date_to: Optional[datetime.date] = None
+        if not order_numbers_mode:
+            if args.date_from:
+                date_from = _parse_date_arg(args.date_from)
+            if args.date_to:
+                date_to = _parse_date_arg(args.date_to)
 
-        if date_from or date_to:
-            period_str = f"{date_from or '---'} ～ {date_to or '---'}"
-            print(f"期間: {period_str}")
-    else:
-        print(f"伝票番号指定モード: {len(order_numbers_mode)}件")
+            if date_from or date_to:
+                period_str = f"{date_from or '---'} ～ {date_to or '---'}"
+                print(f"期間: {period_str}")
+        else:
+            print(f"伝票番号指定モード: {len(order_numbers_mode)}件")
 
-    # --- 7. 顧客別事前グルーピング ---
-    orders_by_customer: dict[str, list[OrderRow]] = {}
-    for order in orders:
-        name = order.customer_name.strip()
-        if name:
-            if name not in orders_by_customer:
-                orders_by_customer[name] = []
-            orders_by_customer[name].append(order)
-
-    all_customer_names = list(orders_by_customer.keys())
-    master_customers = set(cache.cust_days.keys())
-    skipped_order_count = 0
-
-    if order_numbers_mode:
-        # 伝票番号モード: 指定された番号から対象顧客を自動決定
-        order_number_set = set(order_numbers_mode)
-        target_names: set[str] = set()
+        # --- 7. 顧客別事前グルーピング ---
+        orders_by_customer: dict[str, list[OrderRow]] = {}
         for order in orders:
-            if order.order_number in order_number_set:
-                name = order.customer_name.strip()
-                if name and name in master_customers:
-                    target_names.add(name)
-        customer_names = sorted(target_names)
-        if not customer_names:
-            print("エラー: 指定された伝票番号に対応する顧客が見つかりません。")
-            return
-    elif args.customer:
-        # カンマ区切りの複数顧客に対応
-        selected_names = [n.strip() for n in args.customer.split(",")]
-        # 存在チェック
-        for name in selected_names:
-            if name not in all_customer_names:
-                print(f"警告: 顧客 '{name}' は受注データに存在しません。")
-        customer_names = [n for n in selected_names if n in all_customer_names]
-        if not customer_names:
-            print("エラー: 指定された顧客が受注データに見つかりません。")
-            return
-        # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
-        skipped = [n for n in customer_names if n not in master_customers]
-        customer_names = [n for n in customer_names if n in master_customers]
-        skipped_order_count = sum(len(orders_by_customer.get(n, [])) for n in skipped)
-        if skipped:
-            print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
-    else:
-        customer_names = all_customer_names
-        # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
-        skipped = [n for n in customer_names if n not in master_customers]
-        customer_names = [n for n in customer_names if n in master_customers]
-        skipped_order_count = sum(len(orders_by_customer.get(n, [])) for n in skipped)
-        if skipped:
-            print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
+            name = order.customer_name.strip()
+            if name:
+                if name not in orders_by_customer:
+                    orders_by_customer[name] = []
+                orders_by_customer[name].append(order)
 
-    print(f"対象顧客: {len(customer_names)}件")
+        all_customer_names = list(orders_by_customer.keys())
+        master_customers = set(cache.cust_days.keys())
+        skipped_order_count = 0
 
-    # 顧客マスターのメールアドレスチェック（警告のみ）
-    if args.email_mode != "none":
-        cust_ws = cust_wb["顧客マスター"]
-        missing = check_customer_master(
-            customer_names, cust_ws, cache.cust_email_start_col
-        )
-        if missing:
-            print("警告: 以下の顧客はメールアドレスが未登録です:")
-            print(missing)
-
-    # --- 8. 出力フォルダ ---
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        output_dir = get_output_folder(str(tool_folder), execution_time)
-
-    print(f"出力先: {output_dir}")
-    print()
-
-    # --- 9. 回答書生成ループ ---
-    all_results: list[ReportResult] = []
-    gen_start = time.perf_counter()
-
-    for cust in customer_names:
-        # 担当者別分割判定
-        if rep_master_ws is not None and is_split_by_rep(cust, rep_master_ws):
-            rep_list = get_rep_list(cust, rep_master_ws)
-            # 登録担当者ごと + __OTHER__（未登録担当者用）
-            rep_names_to_process = rep_list + ["__OTHER__"]
+        if order_numbers_mode:
+            # 伝票番号モード: 指定された番号から対象顧客を自動決定
+            order_number_set = set(order_numbers_mode)
+            target_names: set[str] = set()
+            for order in orders:
+                if order.order_number in order_number_set:
+                    name = order.customer_name.strip()
+                    if name and name in master_customers:
+                        target_names.add(name)
+            customer_names = sorted(target_names)
+            if not customer_names:
+                print("エラー: 指定された伝票番号に対応する顧客が見つかりません。")
+                return
+        elif args.customer:
+            # カンマ区切りの複数顧客に対応
+            selected_names = [n.strip() for n in args.customer.split(",")]
+            # 存在チェック
+            for name in selected_names:
+                if name not in all_customer_names:
+                    print(f"警告: 顧客 '{name}' は受注データに存在しません。")
+            customer_names = [n for n in selected_names if n in all_customer_names]
+            if not customer_names:
+                print("エラー: 指定された顧客が受注データに見つかりません。")
+                return
+            # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
+            skipped = [n for n in customer_names if n not in master_customers]
+            customer_names = [n for n in customer_names if n in master_customers]
+            skipped_order_count = sum(len(orders_by_customer.get(n, [])) for n in skipped)
+            if skipped:
+                print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
         else:
-            rep_names_to_process = [""]  # 分割なし
+            customer_names = all_customer_names
+            # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
+            skipped = [n for n in customer_names if n not in master_customers]
+            customer_names = [n for n in customer_names if n in master_customers]
+            skipped_order_count = sum(len(orders_by_customer.get(n, [])) for n in skipped)
+            if skipped:
+                print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
 
-        for rep_name in rep_names_to_process:
-            if order_numbers_mode:
-                # 伝票番号指定モード
-                result = create_delivery_report_by_order_numbers(
-                    source_data=orders_by_customer.get(cust, []),
-                    customer_name=cust,
-                    order_numbers=order_numbers_mode,
-                    cache=cache,
-                    output_dir=output_dir,
-                    holidays=holidays,
-                    branch=branch,
-                    execution_time=execution_time,
-                    rep_name=rep_name,
-                    rep_master_ws=rep_master_ws,
-                )
+        print(f"対象顧客: {len(customer_names)}件")
+
+        # 顧客マスターのメールアドレスチェック（警告のみ）
+        if args.email_mode != "none":
+            cust_ws = cust_wb["顧客マスター"]
+            missing = check_customer_master(
+                customer_names, cust_ws, cache.cust_email_start_col
+            )
+            if missing:
+                print("警告: 以下の顧客はメールアドレスが未登録です:")
+                print(missing)
+
+        # --- 8. 出力フォルダ ---
+        if args.output_dir:
+            output_dir = Path(args.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            output_dir = get_output_folder(str(tool_folder), execution_time)
+
+        print(f"出力先: {output_dir}")
+        print()
+
+        # --- 9. 回答書生成ループ ---
+        all_results: list[ReportResult] = []
+        gen_start = time.perf_counter()
+
+        for cust in customer_names:
+            # 担当者別分割判定
+            if rep_master_ws is not None and is_split_by_rep(cust, rep_master_ws):
+                rep_list = get_rep_list(cust, rep_master_ws)
+                # 登録担当者ごと + __OTHER__（未登録担当者用）
+                rep_names_to_process = rep_list + ["__OTHER__"]
             else:
-                # 期間指定モード
-                result = create_delivery_report(
-                    source_data=orders_by_customer.get(cust, []),
-                    customer_name=cust,
-                    sent_orders=sent_orders,
-                    cache=cache,
-                    output_dir=output_dir,
-                    holidays=holidays,
-                    branch=branch,
-                    execution_time=execution_time,
-                    date_from=date_from,
-                    date_to=date_to,
-                    rep_name=rep_name,
-                    rep_master_ws=rep_master_ws,
-                )
+                rep_names_to_process = [""]  # 分割なし
 
-            if result:
-                all_results.append(result)
-                confirmed_count = len(result.confirmed_orders)
-                confirming_count = len(result.confirming_orders)
-                print(f"  生成: {result.file_path}")
-                print(f"    確定: {confirmed_count}件 / 確認中: {confirming_count}件")
-            elif rep_name == "" or rep_name == rep_names_to_process[0]:
-                # 分割なし or 最初の担当者のみスキップ表示（__OTHER__等は静かにスキップ）
-                print(f"  スキップ: {cust}（対象データなし）")
+            for rep_name in rep_names_to_process:
+                if order_numbers_mode:
+                    # 伝票番号指定モード
+                    result = create_delivery_report_by_order_numbers(
+                        source_data=orders_by_customer.get(cust, []),
+                        customer_name=cust,
+                        order_numbers=order_numbers_mode,
+                        cache=cache,
+                        output_dir=output_dir,
+                        holidays=holidays,
+                        branch=branch,
+                        execution_time=execution_time,
+                        rep_name=rep_name,
+                        rep_master_ws=rep_master_ws,
+                    )
+                else:
+                    # 期間指定モード
+                    result = create_delivery_report(
+                        source_data=orders_by_customer.get(cust, []),
+                        customer_name=cust,
+                        sent_orders=sent_orders,
+                        cache=cache,
+                        output_dir=output_dir,
+                        holidays=holidays,
+                        branch=branch,
+                        execution_time=execution_time,
+                        date_from=date_from,
+                        date_to=date_to,
+                        rep_name=rep_name,
+                        rep_master_ws=rep_master_ws,
+                    )
 
-    gen_elapsed = time.perf_counter() - gen_start
-    print(f"\n回答書生成: {gen_elapsed:.2f}s")
+                if result:
+                    all_results.append(result)
+                    confirmed_count = len(result.confirmed_orders)
+                    confirming_count = len(result.confirming_orders)
+                    print(f"  生成: {result.file_path}")
+                    print(f"    確定: {confirmed_count}件 / 確認中: {confirming_count}件")
+                elif rep_name == "" or rep_name == rep_names_to_process[0]:
+                    # 分割なし or 最初の担当者のみスキップ表示（__OTHER__等は静かにスキップ）
+                    print(f"  スキップ: {cust}（対象データなし）")
 
-    print()
-    print(f"生成件数: {len(all_results)}件 / {len(customer_names)}顧客")
+        gen_elapsed = time.perf_counter() - gen_start
+        print(f"\n回答書生成: {gen_elapsed:.2f}s")
 
-    if not all_results:
-        print("生成対象のデータがありませんでした。")
-        return
+        print()
+        print(f"生成件数: {len(all_results)}件 / {len(customer_names)}顧客")
 
-    # --- 10. 送付履歴保存（バッチ化して1回の読み書きで完了） ---
-    # 全顧客の結果をまとめてから1回だけ保存（毎回44K行の再読み書きを回避）
-    all_confirmed = []
-    all_confirming = []
-    for result in all_results:
-        all_confirmed.extend(result.confirmed_orders)
-        all_confirming.extend(result.confirming_orders)
+        if not all_results:
+            print("生成対象のデータがありませんでした。")
+            return
 
-    has_updates = bool(all_confirmed or all_confirming)
-    if has_updates:
-        t_save = time.perf_counter()
-        save_history_batch(
-            str(history_path), history_rows, confirming_rows,
-            all_confirmed, all_confirming,
-            execution_time, args.sender,
-        )
-        save_elapsed = time.perf_counter() - t_save
-        print(f"送付履歴保存: {history_path} ({save_elapsed:.2f}s)")
-    else:
-        print("送付履歴: 更新なし")
+        # --- 10. 送付履歴保存（バッチ化して1回の読み書きで完了） ---
+        # 全顧客の結果をまとめてから1回だけ保存（毎回44K行の再読み書きを回避）
+        all_confirmed = []
+        all_confirming = []
+        for result in all_results:
+            all_confirmed.extend(result.confirmed_orders)
+            all_confirming.extend(result.confirming_orders)
 
-    # --- 11. メール生成 ---
-    if args.email_mode != "none" and all_results:
-        from nouki_kaitou.email_builder import (
-            create_outlook_drafts,
-            create_outlook_sends,
-        )
-
-        created_files = [result_to_email_input(r) for r in all_results]
-        cust_ws = cust_wb["顧客マスター"]
-        emails = create_emails(
-            created_files=created_files,
-            branch=branch,
-            customer_master_ws=cust_ws,
-            rep_master_ws=rep_master_ws,
-            holidays=holidays,
-            cache=cache,
-            send_directly=(args.email_mode == "send"),
-        )
-
-        if emails:
-            if args.email_mode == "send":
-                # 直接送信
-                sent = create_outlook_sends(emails)
-                print(f"メール送信: {len(sent)}件")
-            elif args.email_mode == "draft":
-                # Outlook下書き作成
-                created = create_outlook_drafts(emails)
-                print(f"Outlook下書き作成: {len(created)}件")
+        has_updates = bool(all_confirmed or all_confirming)
+        if has_updates:
+            t_save = time.perf_counter()
+            save_history_batch(
+                str(history_path), history_rows, confirming_rows,
+                all_confirmed, all_confirming,
+                execution_time, args.sender,
+            )
+            save_elapsed = time.perf_counter() - t_save
+            print(f"送付履歴保存: {history_path} ({save_elapsed:.2f}s)")
         else:
-            print("メール生成: 0件（宛先未登録等でスキップ）")
+            print("送付履歴: 更新なし")
 
-    # --- 処理結果サマリー ---
-    confirmed_total = len(all_confirmed)
-    confirming_total = len(all_confirming)
-    total = confirmed_total + confirming_total + skipped_order_count
-    print("=" * 40)
-    print("  処理結果サマリー")
-    print("=" * 40)
-    print(f"  確定:      {confirmed_total}件")
-    print(f"  確認中:    {confirming_total}件")
-    print(f"  スキップ:  {skipped_order_count}件")
-    print(f"  合計:      {total}件")
-    print("=" * 40)
-    print()
-    print("完了しました。")
+        # --- 11. メール生成 ---
+        if args.email_mode != "none" and all_results:
+            from nouki_kaitou.email_builder import (
+                create_outlook_drafts,
+                create_outlook_sends,
+            )
+
+            created_files = [result_to_email_input(r) for r in all_results]
+            cust_ws = cust_wb["顧客マスター"]
+            emails = create_emails(
+                created_files=created_files,
+                branch=branch,
+                customer_master_ws=cust_ws,
+                rep_master_ws=rep_master_ws,
+                holidays=holidays,
+                cache=cache,
+                send_directly=(args.email_mode == "send"),
+            )
+
+            if emails:
+                if args.email_mode == "send":
+                    # 直接送信
+                    sent = create_outlook_sends(emails)
+                    print(f"メール送信: {len(sent)}件")
+                elif args.email_mode == "draft":
+                    # Outlook下書き作成
+                    created = create_outlook_drafts(emails)
+                    print(f"Outlook下書き作成: {len(created)}件")
+            else:
+                print("メール生成: 0件（宛先未登録等でスキップ）")
+
+        # --- 処理結果サマリー ---
+        confirmed_total = len(all_confirmed)
+        confirming_total = len(all_confirming)
+        total = confirmed_total + confirming_total + skipped_order_count
+        print("=" * 40)
+        print("  処理結果サマリー")
+        print("=" * 40)
+        print(f"  確定:      {confirmed_total}件")
+        print(f"  確認中:    {confirming_total}件")
+        print(f"  スキップ:  {skipped_order_count}件")
+        print(f"  合計:      {total}件")
+        print("=" * 40)
+        print()
+        print("完了しました。")
+    finally:
+        # マスターワークブックを閉じる（例外発生時も確実にクローズ）
+        if mfg_wb is not None:
+            mfg_wb.close()
+        cust_wb.close()
 
 
 def main() -> None:

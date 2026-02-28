@@ -24,7 +24,8 @@
       "Bash(powershell:*)",
       "Bash(git pull:*)",
       "Bash(git:*)",
-      "Bash(npx skills:*)"
+      "Bash(npx skills:*)",
+      "Bash(python3:*)"
     ]
   }
 }
