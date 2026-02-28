@@ -637,6 +637,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
 
     all_customer_names = list(orders_by_customer.keys())
     master_customers = set(cache.cust_days.keys())
+    skipped_order_count = 0
 
     if order_numbers_mode:
         # 伝票番号モード: 指定された番号から対象顧客を自動決定
@@ -665,6 +666,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
         skipped = [n for n in customer_names if n not in master_customers]
         customer_names = [n for n in customer_names if n in master_customers]
+        skipped_order_count = sum(len(orders_by_customer.get(n, [])) for n in skipped)
         if skipped:
             print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
     else:
@@ -672,6 +674,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         # 顧客マスターに登録されている顧客のみ対象（VBA版と同じ動作）
         skipped = [n for n in customer_names if n not in master_customers]
         customer_names = [n for n in customer_names if n in master_customers]
+        skipped_order_count = sum(len(orders_by_customer.get(n, [])) for n in skipped)
         if skipped:
             print(f"顧客マスター未登録（スキップ）: {len(skipped)}件")
 
@@ -814,6 +817,18 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         else:
             print("メール生成: 0件（宛先未登録等でスキップ）")
 
+    # --- 処理結果サマリー ---
+    confirmed_total = len(all_confirmed)
+    confirming_total = len(all_confirming)
+    total = confirmed_total + confirming_total + skipped_order_count
+    print("=" * 40)
+    print("  処理結果サマリー")
+    print("=" * 40)
+    print(f"  確定:      {confirmed_total}件")
+    print(f"  確認中:    {confirming_total}件")
+    print(f"  スキップ:  {skipped_order_count}件")
+    print(f"  合計:      {total}件")
+    print("=" * 40)
     print()
     print("完了しました。")
 

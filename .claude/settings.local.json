@@ -21,7 +21,10 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(cd:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(git pull:*)",
+      "Bash(git:*)",
+      "Bash(npx skills:*)"
     ]
   }
 }
