@@ -21,7 +21,8 @@
       "Bash(git pull:*)",
       "Bash(git:*)",
       "Bash(npx skills:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(copy:*)"
     ]
   }
 }

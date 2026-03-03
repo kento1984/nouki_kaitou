@@ -206,14 +206,14 @@ class TestCopyDataRow:
         assert ws.cell(row=7, column=1).fill.patternType is None
 
     def test_customer_order_number_numeric(self):
-        """数字のみの貴社注番はint型で書き込まれる"""
+        """数字のみの貴社注番も文字列のまま書き込まれる"""
         wb = Workbook()
         ws = wb.active
         row = self._make_row(customer_order_number="12345")
         copy_data_row(ws, 7, row)
         val = ws.cell(row=7, column=3).value
-        assert val == 12345
-        assert isinstance(val, int)
+        assert val == "12345"
+        assert isinstance(val, str)
 
     def test_customer_order_number_alphanumeric(self):
         """文字混じりの貴社注番はそのまま文字列"""
