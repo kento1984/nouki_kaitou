@@ -49,6 +49,23 @@ def _calc_pattern_days(
     return pattern.days_after_all
 
 
+def _calc_pattern_period(
+    hour: int, minute: int, pattern: DeliveryPattern
+) -> str:
+    """パターン定義から配達時間帯ラベルを算出する（空文字＝表示なし）。
+
+    2段階cutoff（cutoff2あり）のパターンは午前便・午後便の区別があるため
+    PM/AM/PMを自動設定する。1段階パターンは常に空文字。
+    """
+    if pattern.cutoff2 is None:
+        return ""
+    if (hour, minute) < pattern.cutoff1:
+        return "PM"
+    if (hour, minute) < pattern.cutoff2:
+        return "AM"
+    return "PM"
+
+
 def check_sendai_stock_completed(
     row: OrderRow,
     cache: CacheStore,
@@ -127,8 +144,9 @@ def check_sendai_stock_completed(
             ship_date = add_business_days(reg_date, 1, holidays)
         return _sendai_result(ship_date, "出荷済み", "出荷予定", today)
 
-    # 8. パターンから営業日数を算出
+    # 8. パターンから営業日数・時間帯ラベルを算出
     biz_days = _calc_pattern_days(hour, minute, pattern)
+    period = _calc_pattern_period(hour, minute, pattern)
 
     if biz_days == 0:
         adjusted = reg_date
@@ -141,13 +159,13 @@ def check_sendai_stock_completed(
         adjusted = get_next_delivery_day(adjusted, delivery_days, holidays)
         return _sendai_result(adjusted, "出荷済み", "出荷予定", today)
 
-    # 10. 曜日制限なし
+    # 10. 曜日制限なし（配達パス: periodあり）
     # biz_days==0: 配達日が今日以降なら「配達予定」、過去なら「配達済み」
     if biz_days == 0 and adjusted >= today:
         past_suffix = "配達予定"
     else:
         past_suffix = "配達済み"
-    return _sendai_result(adjusted, past_suffix, "配達予定", today)
+    return _sendai_result(adjusted, past_suffix, "配達予定", today, period)
 
 
 def check_sendai_himozuki_completed(
@@ -205,8 +223,9 @@ def check_sendai_himozuki_completed(
     # 4. execution_timeからhour/minuteを取得
     hour, minute = execution_time.hour, execution_time.minute
 
-    # 5. パターンから営業日数を算出（todayベース）
+    # 5. パターンから営業日数・時間帯ラベルを算出（todayベース）
     biz_days = _calc_pattern_days(hour, minute, pattern)
+    period = _calc_pattern_period(hour, minute, pattern)
 
     if biz_days == 0:
         adjusted = today
@@ -229,17 +248,18 @@ def check_sendai_himozuki_completed(
         ship_date = _get_prev_bday(adjusted, holidays)
         return _sendai_result(ship_date, "出荷済み", "出荷予定", today)
 
-    # 9. 自社便配達
+    # 9. 自社便配達（配達パス: periodあり）
     # biz_days==0: 配達日が今日以降なら「配達予定」、過去なら「配達済み」
     if biz_days == 0 and adjusted >= today:
         past_suffix = "配達予定"
     else:
         past_suffix = "配達済み"
-    return _sendai_result(adjusted, past_suffix, "配達予定", today)
+    return _sendai_result(adjusted, past_suffix, "配達予定", today, period)
 
 
 def _sendai_result(
-    d: datetime.date, past: str, future: str, today: datetime.date
+    d: datetime.date, past: str, future: str, today: datetime.date,
+    period: str = "",
 ) -> str:
-    """日付 + 過去/未来サフィックスでフォーマット（delivery_calc._resultと同等）"""
-    return format_date_japanese(d) + (past if d <= today else future)
+    """日付 + 時間帯 + 過去/未来サフィックスでフォーマット（delivery_calc._resultと同等）"""
+    return format_date_japanese(d) + period + (past if d <= today else future)

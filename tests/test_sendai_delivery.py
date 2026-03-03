@@ -13,6 +13,7 @@ from nouki_kaitou.models import (
 from nouki_kaitou.sendai_delivery import (
     _before_cutoff_hm,
     _calc_pattern_days,
+    _calc_pattern_period,
     check_sendai_himozuki_completed,
     check_sendai_stock_completed,
 )
@@ -225,17 +226,17 @@ class TestSendaiStockCompleted:
     # --- 近隣2便 ---
 
     def test_kinrin_before_cutoff1(self):
-        """近隣2便 10:00 → 当日配達予定（当日便はまだ届いていない）"""
+        """近隣2便 10:00 → 当日PM配達予定（当日便はまだ届いていない）"""
         row = _make_row(time_value="10:00:00")
         cache = _make_cache("近隣2便")
         result = check_sendai_stock_completed(
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(TODAY) + "配達予定"
+        assert result == format_date_japanese(TODAY) + "PM配達予定"
 
     def test_kinrin_at_cutoff1(self):
-        """近隣2便 11:30(ちょうど=超過) → 翌営業日配達予定"""
+        """近隣2便 11:30(ちょうど=超過) → 翌営業日AM配達予定"""
         row = _make_row(time_value="11:30:00")
         cache = _make_cache("近隣2便")
         # TODAY=2/23(月) → 翌営業日=2/24(火)
@@ -244,10 +245,10 @@ class TestSendaiStockCompleted:
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected_date) + "配達予定"
+        assert result == format_date_japanese(expected_date) + "AM配達予定"
 
     def test_kinrin_between_cutoffs(self):
-        """近隣2便 14:00 → 翌営業日配達予定"""
+        """近隣2便 14:00 → 翌営業日AM配達予定"""
         row = _make_row(time_value="14:00:00")
         cache = _make_cache("近隣2便")
         expected_date = datetime.date(2026, 2, 24)
@@ -255,10 +256,10 @@ class TestSendaiStockCompleted:
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected_date) + "配達予定"
+        assert result == format_date_japanese(expected_date) + "AM配達予定"
 
     def test_kinrin_at_cutoff2(self):
-        """近隣2便 16:00(ちょうど=超過) → 翌営業日配達予定"""
+        """近隣2便 16:00(ちょうど=超過) → 翌営業日PM配達予定"""
         row = _make_row(time_value="16:00:00")
         cache = _make_cache("近隣2便")
         expected_date = datetime.date(2026, 2, 24)
@@ -266,10 +267,10 @@ class TestSendaiStockCompleted:
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected_date) + "配達予定"
+        assert result == format_date_japanese(expected_date) + "PM配達予定"
 
     def test_kinrin_after_cutoff2(self):
-        """近隣2便 17:00 → 翌営業日配達予定"""
+        """近隣2便 17:00 → 翌営業日PM配達予定"""
         row = _make_row(time_value="17:00:00")
         cache = _make_cache("近隣2便")
         expected_date = datetime.date(2026, 2, 24)
@@ -277,7 +278,7 @@ class TestSendaiStockCompleted:
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected_date) + "配達予定"
+        assert result == format_date_japanese(expected_date) + "PM配達予定"
 
     # --- 遠方午前 ---
 
@@ -416,12 +417,12 @@ class TestSendaiStockCompleted:
         saturday = datetime.date(2026, 2, 21)  # 土曜日
         row = _make_row(time_value="10:00:00", reg_date=saturday)
         cache = _make_cache("近隣2便")
-        # 土曜→翌営業日(月曜2/23)が起算、10:00<11:30 → 当日配達予定
+        # 土曜→翌営業日(月曜2/23)が起算、10:00<11:30 → 当日PM配達予定
         result = check_sendai_stock_completed(
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(TODAY) + "配達予定"
+        assert result == format_date_japanese(TODAY) + "PM配達予定"
 
     # --- 祝日登録 ---
 
@@ -431,13 +432,13 @@ class TestSendaiStockCompleted:
         holidays = {holiday_date: None}
         row = _make_row(time_value="10:00:00", reg_date=holiday_date)
         cache = _make_cache("近隣2便")
-        # 祝日→翌営業日(2/24火曜)が起算、10:00<11:30 → 当日配達
+        # 祝日→翌営業日(2/24火曜)が起算、10:00<11:30 → 当日PM配達
         expected_date = datetime.date(2026, 2, 24)
         result = check_sendai_stock_completed(
             row, cache, holidays, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected_date) + "配達予定"
+        assert result == format_date_japanese(expected_date) + "PM配達予定"
 
     # --- 登録日/時刻なし ---
 
@@ -465,7 +466,7 @@ class TestSendaiStockCompleted:
     # --- 当日配達(biz_days==0)の過去日 ---
 
     def test_kinrin_biz0_past_date(self):
-        """近隣2便 biz_days=0 + 登録日が過去 → 配達済み"""
+        """近隣2便 biz_days=0 + 登録日が過去 → PM配達済み"""
         past_date = datetime.date(2026, 2, 20)  # 金曜日（過去）
         row = _make_row(time_value="10:00:00", reg_date=past_date)
         cache = _make_cache("近隣2便")
@@ -473,7 +474,7 @@ class TestSendaiStockCompleted:
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(past_date) + "配達済み"
+        assert result == format_date_japanese(past_date) + "PM配達済み"
 
     def test_enpo_gogo_biz0_past_date(self):
         """遠方午後 biz_days=0 + 登録日が過去 → 配達済み"""
@@ -487,14 +488,14 @@ class TestSendaiStockCompleted:
         assert result == format_date_japanese(past_date) + "配達済み"
 
     def test_kinrin_biz0_today_still_yotei(self):
-        """近隣2便 biz_days=0 + 登録日が今日 → 配達予定（変わらず）"""
+        """近隣2便 biz_days=0 + 登録日が今日 → PM配達予定（変わらず）"""
         row = _make_row(time_value="10:00:00", reg_date=TODAY)
         cache = _make_cache("近隣2便")
         result = check_sendai_stock_completed(
             row, cache, {}, SENDAI_BRANCH, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(TODAY) + "配達予定"
+        assert result == format_date_japanese(TODAY) + "PM配達予定"
 
 
 # ============================================
@@ -585,7 +586,7 @@ class TestSendaiHimozukiCompleted:
     # --- 近隣2便: execution_timeベース ---
 
     def test_kinrin_before_cutoff1(self):
-        """近隣2便 実行10:00 → 当日配達予定(+0)"""
+        """近隣2便 実行10:00 → 当日PM配達予定(+0)"""
         row = _make_himozuki_row()
         cache = _make_cache("近隣2便")
         exec_time = datetime.datetime(2026, 2, 23, 10, 0)
@@ -593,10 +594,10 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(TODAY) + "配達予定"
+        assert result == format_date_japanese(TODAY) + "PM配達予定"
 
     def test_kinrin_at_cutoff1(self):
-        """近隣2便 実行11:30(ちょうど=超過) → 翌営業日配達予定(+1)"""
+        """近隣2便 実行11:30(ちょうど=超過) → 翌営業日AM配達予定(+1)"""
         row = _make_himozuki_row()
         cache = _make_cache("近隣2便")
         exec_time = datetime.datetime(2026, 2, 23, 11, 30)
@@ -605,10 +606,10 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected) + "配達予定"
+        assert result == format_date_japanese(expected) + "AM配達予定"
 
     def test_kinrin_between_cutoffs(self):
-        """近隣2便 実行14:00 → 翌営業日配達予定(+1)"""
+        """近隣2便 実行14:00 → 翌営業日AM配達予定(+1)"""
         row = _make_himozuki_row()
         cache = _make_cache("近隣2便")
         exec_time = datetime.datetime(2026, 2, 23, 14, 0)
@@ -617,10 +618,10 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected) + "配達予定"
+        assert result == format_date_japanese(expected) + "AM配達予定"
 
     def test_kinrin_at_cutoff2(self):
-        """近隣2便 実行16:00(ちょうど=超過) → 翌営業日配達予定(+1)"""
+        """近隣2便 実行16:00(ちょうど=超過) → 翌営業日PM配達予定(+1)"""
         row = _make_himozuki_row()
         cache = _make_cache("近隣2便")
         exec_time = datetime.datetime(2026, 2, 23, 16, 0)
@@ -629,10 +630,10 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected) + "配達予定"
+        assert result == format_date_japanese(expected) + "PM配達予定"
 
     def test_kinrin_after_cutoff2(self):
-        """近隣2便 実行17:00 → 翌営業日配達予定(+1)"""
+        """近隣2便 実行17:00 → 翌営業日PM配達予定(+1)"""
         row = _make_himozuki_row()
         cache = _make_cache("近隣2便")
         exec_time = datetime.datetime(2026, 2, 23, 17, 0)
@@ -641,7 +642,7 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(expected) + "配達予定"
+        assert result == format_date_japanese(expected) + "PM配達予定"
 
     # --- 遠方午前 ---
 
@@ -781,7 +782,7 @@ class TestSendaiHimozukiCompleted:
     # --- 当日配達(biz_days==0)の確認 ---
 
     def test_kinrin_biz0_today_still_yotei(self):
-        """近隣2便 biz_days=0 + adjusted==today → 配達予定（変わらず）"""
+        """近隣2便 biz_days=0 + adjusted==today → PM配達予定（変わらず）"""
         row = _make_himozuki_row()
         cache = _make_cache("近隣2便")
         exec_time = datetime.datetime(2026, 2, 23, 10, 0)
@@ -789,12 +790,12 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
-        assert result == format_date_japanese(TODAY) + "配達予定"
+        assert result == format_date_japanese(TODAY) + "PM配達予定"
 
     # --- 全角/半角の顧客名比較 ---
 
     def test_fullwidth_halfwidth_same_customer(self):
-        """全角半角が揺れても受注先=出荷先と判定 → 配達予定"""
+        """全角半角が揺れても受注先=出荷先と判定 → PM配達予定"""
         row = _make_himozuki_row(
             customer_name="（有）三橋機工",
             ship_to_name="(有)三橋機工",
@@ -807,4 +808,137 @@ class TestSendaiHimozukiCompleted:
             row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
             "東北商品センター", False,
         )
+        assert result == format_date_japanese(TODAY) + "PM配達予定"
+
+
+# ============================================
+# TestCalcPatternPeriod
+# ============================================
+class TestCalcPatternPeriod:
+    """_calc_pattern_periodのユニットテスト"""
+
+    def test_kinrin_before_cutoff1(self):
+        """近隣2便: cutoff1前 → PM"""
+        assert _calc_pattern_period(10, 0, KINRIN_2BIN) == "PM"
+
+    def test_kinrin_at_cutoff1(self):
+        """近隣2便: cutoff1ちょうど → AM（cutoff1～cutoff2間）"""
+        assert _calc_pattern_period(11, 30, KINRIN_2BIN) == "AM"
+
+    def test_kinrin_between_cutoffs(self):
+        """近隣2便: cutoff1～cutoff2間 → AM"""
+        assert _calc_pattern_period(14, 0, KINRIN_2BIN) == "AM"
+
+    def test_kinrin_at_cutoff2(self):
+        """近隣2便: cutoff2ちょうど → PM（cutoff2以降）"""
+        assert _calc_pattern_period(16, 0, KINRIN_2BIN) == "PM"
+
+    def test_kinrin_after_cutoff2(self):
+        """近隣2便: cutoff2以降 → PM"""
+        assert _calc_pattern_period(17, 0, KINRIN_2BIN) == "PM"
+
+    def test_enpo_gozen_before(self):
+        """遠方午前: cutoff1前 → 空文字（表示なし）"""
+        assert _calc_pattern_period(10, 0, ENPO_GOZEN) == ""
+
+    def test_enpo_gozen_after(self):
+        """遠方午前: cutoff1以降 → 空文字（1段階パターンは常に空）"""
+        assert _calc_pattern_period(16, 0, ENPO_GOZEN) == ""
+
+    def test_enpo_gogo_before(self):
+        """遠方午後: cutoff1前 → 空文字"""
+        assert _calc_pattern_period(10, 0, ENPO_GOGO) == ""
+
+    def test_enpo_gogo_after(self):
+        """遠方午後: cutoff1以降 → 空文字"""
+        assert _calc_pattern_period(11, 30, ENPO_GOGO) == ""
+
+
+# ============================================
+# 遠方パターン回帰テスト（AM/PM表示なし確認）
+# ============================================
+class TestEnpoNoPeriod:
+    """遠方午前・遠方午後でAM/PM表示がないことを確認する回帰テスト"""
+
+    def test_enpo_gozen_stock_no_period(self):
+        """遠方午前 在庫販売 → AM/PMなし"""
+        row = _make_row(time_value="10:00:00")
+        cache = _make_cache("遠方午前")
+        expected = datetime.date(2026, 2, 24)
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(expected) + "配達予定"
+        assert "AM" not in result
+        assert "PM" not in result
+
+    def test_enpo_gogo_stock_no_period(self):
+        """遠方午後 在庫販売 → AM/PMなし"""
+        row = _make_row(time_value="10:00:00")
+        cache = _make_cache("遠方午後")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
         assert result == format_date_japanese(TODAY) + "配達予定"
+        assert "AM" not in result
+        assert "PM" not in result
+
+    def test_enpo_gozen_himozuki_no_period(self):
+        """遠方午前 紐付き → AM/PMなし"""
+        row = _make_himozuki_row()
+        cache = _make_cache("遠方午前")
+        exec_time = datetime.datetime(2026, 2, 23, 10, 0)
+        expected = datetime.date(2026, 2, 24)
+        result = check_sendai_himozuki_completed(
+            row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(expected) + "配達予定"
+        assert "AM" not in result
+        assert "PM" not in result
+
+    def test_enpo_gogo_himozuki_no_period(self):
+        """遠方午後 紐付き → AM/PMなし"""
+        row = _make_himozuki_row()
+        cache = _make_cache("遠方午後")
+        exec_time = datetime.datetime(2026, 2, 23, 10, 0)
+        result = check_sendai_himozuki_completed(
+            row, cache, {}, SENDAI_BRANCH, exec_time, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(TODAY) + "配達予定"
+        assert "AM" not in result
+        assert "PM" not in result
+
+
+# ============================================
+# 過去日のAM/PMテスト
+# ============================================
+class TestPastDateWithPeriod:
+    """配達済みでもAM/PMが付くことを確認するテスト"""
+
+    def test_stock_kinrin_past_pm(self):
+        """在庫販売 近隣2便 過去日 10:00 → PM配達済み"""
+        past_date = datetime.date(2026, 2, 20)  # 金曜日（過去）
+        row = _make_row(time_value="10:00:00", reg_date=past_date)
+        cache = _make_cache("近隣2便")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(past_date) + "PM配達済み"
+
+    def test_stock_kinrin_past_am(self):
+        """在庫販売 近隣2便 過去日 14:00 → AM配達済み（翌営業日だが過去）"""
+        past_date = datetime.date(2026, 2, 19)  # 木曜日（過去）
+        row = _make_row(time_value="14:00:00", reg_date=past_date)
+        cache = _make_cache("近隣2便")
+        # 14:00 → cutoff1～cutoff2間 → biz_days=1 → 2/20(金)、AM
+        expected = datetime.date(2026, 2, 20)
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", False,
+        )
+        assert result == format_date_japanese(expected) + "AM配達済み"
