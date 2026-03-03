@@ -738,6 +738,146 @@ class TestFormatReportStockout:
                 break
         assert found, "入荷次第の文言が見つからない"
 
+    def test_stockout_mixed_confirmed_and_pending(self):
+        """入荷確定と欠品継続が混在する場合、両グループが表示される"""
+        wb = Workbook()
+        ws = wb.active
+        create_header(ws, "テスト")
+        row = ReportRow(delivery_answer="欠品中")
+        copy_data_row(ws, 7, row)
+
+        stockout_list = [
+            StockoutEntry(
+                manufacturer_name="メーカーA",
+                product_name="製品A",
+                quantity="10",
+                delivery="3月10日出荷予定",
+            ),
+            StockoutEntry(
+                manufacturer_name="メーカーB",
+                product_name="製品B",
+                quantity="20",
+                delivery="欠品中",
+                approx_delivery="3月下旬入荷予定",
+            ),
+        ]
+        format_report(
+            ws, 7,
+            stockout_info_list=stockout_list,
+            today=datetime.date(2026, 2, 16),
+        )
+
+        texts = []
+        for row_num in range(1, ws.max_row + 1):
+            val = ws.cell(row=row_num, column=1).value
+            if val:
+                texts.append(str(val))
+        all_text = "\n".join(texts)
+
+        assert "入荷日が確定" in all_text, "入荷確定ヘッダーが見つからない"
+        assert "3月10日出荷予定" in all_text, "確定日が見つからない"
+        assert "欠品中" in all_text, "欠品継続ヘッダーが見つからない"
+        assert "3月下旬入荷予定" in all_text, "概算入荷日が見つからない"
+
+    def test_stockout_only_confirmed(self):
+        """全品入荷確定の場合、欠品継続セクションは表示されない"""
+        wb = Workbook()
+        ws = wb.active
+        create_header(ws, "テスト")
+        row = ReportRow(delivery_answer="欠品中")
+        copy_data_row(ws, 7, row)
+
+        stockout_list = [
+            StockoutEntry(
+                manufacturer_name="メーカーA",
+                product_name="製品A",
+                quantity="10",
+                delivery="3月10日出荷予定",
+            ),
+        ]
+        format_report(
+            ws, 7,
+            stockout_info_list=stockout_list,
+            today=datetime.date(2026, 2, 16),
+        )
+
+        texts = []
+        for row_num in range(1, ws.max_row + 1):
+            val = ws.cell(row=row_num, column=1).value
+            if val:
+                texts.append(str(val))
+        all_text = "\n".join(texts)
+
+        assert "入荷日が確定" in all_text, "入荷確定ヘッダーが見つからない"
+        assert "3月10日出荷予定" in all_text, "確定日が見つからない"
+        assert "現在欠品中" not in all_text, "欠品継続セクションが不要に表示されている"
+
+    def test_stockout_only_pending(self):
+        """全品欠品継続の場合、入荷確定セクションは表示されない"""
+        wb = Workbook()
+        ws = wb.active
+        create_header(ws, "テスト")
+        row = ReportRow(delivery_answer="欠品中")
+        copy_data_row(ws, 7, row)
+
+        stockout_list = [
+            StockoutEntry(
+                manufacturer_name="メーカーA",
+                product_name="製品A",
+                quantity="10",
+                delivery="欠品中",
+                approx_delivery="3月上旬入荷予定",
+            ),
+        ]
+        format_report(
+            ws, 7,
+            stockout_info_list=stockout_list,
+            today=datetime.date(2026, 2, 16),
+        )
+
+        texts = []
+        for row_num in range(1, ws.max_row + 1):
+            val = ws.cell(row=row_num, column=1).value
+            if val:
+                texts.append(str(val))
+        all_text = "\n".join(texts)
+
+        assert "入荷日が確定" not in all_text, "入荷確定セクションが不要に表示されている"
+        assert "現在欠品中" in all_text, "欠品継続ヘッダーが見つからない"
+        assert "3月上旬入荷予定" in all_text, "概算入荷日が見つからない"
+
+    def test_stockout_confirmed_color(self):
+        """入荷確定グループは緑色のフォントで表示される"""
+        wb = Workbook()
+        ws = wb.active
+        create_header(ws, "テスト")
+        row = ReportRow(delivery_answer="欠品中")
+        copy_data_row(ws, 7, row)
+
+        stockout_list = [
+            StockoutEntry(
+                manufacturer_name="メーカーA",
+                product_name="製品A",
+                quantity="10",
+                delivery="3月10日出荷予定",
+            ),
+        ]
+        format_report(
+            ws, 7,
+            stockout_info_list=stockout_list,
+            today=datetime.date(2026, 2, 16),
+        )
+
+        for row_num in range(1, ws.max_row + 1):
+            val = ws.cell(row=row_num, column=1).value
+            if val and "入荷日が確定" in str(val):
+                font = ws.cell(row=row_num, column=1).font
+                assert font.color and font.color.rgb and "338833" in str(font.color.rgb), \
+                    f"入荷確定ヘッダーの色が緑でない: {font.color}"
+                break
+        else:
+            assert False, "入荷確定ヘッダーが見つからない"
+
 
 # ============================================
 # FormatReport — 分納セクション

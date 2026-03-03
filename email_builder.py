@@ -23,6 +23,8 @@ from nouki_kaitou.models import (
     HolidayMap,
     StockoutEntry,
     TrackingEntry,
+    _UNCONFIRMED_DELIVERY,
+    is_stockout_confirmed,
 )
 from nouki_kaitou.representative import get_rep_email_addresses
 
@@ -377,24 +379,12 @@ def _build_tracking_section(
     return "".join(parts)
 
 
-_UNCONFIRMED_DELIVERY = ("欠品中", "確認中", "日程調整中")
-
-
-def _is_stockout_confirmed(item: StockoutEntry) -> bool:
-    """欠品の入荷日が確定しているか判定する。"""
-    return bool(
-        item.delivery
-        and item.delivery not in _UNCONFIRMED_DELIVERY
-        and "（欠品）" not in item.delivery
-    )
-
-
 def _build_stockout_section(
     stockout_info_list: list[StockoutEntry],
 ) -> str:
     """欠品情報セクション（入荷確定 + 欠品継続の2グループ）"""
-    confirmed = [i for i in stockout_info_list if _is_stockout_confirmed(i)]
-    pending = [i for i in stockout_info_list if not _is_stockout_confirmed(i)]
+    confirmed = [i for i in stockout_info_list if is_stockout_confirmed(i)]
+    pending = [i for i in stockout_info_list if not is_stockout_confirmed(i)]
 
     parts: list[str] = []
     if confirmed:

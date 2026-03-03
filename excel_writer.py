@@ -32,6 +32,7 @@ from nouki_kaitou.models import (
     ReportRow,
     StockoutEntry,
     TrackingEntry,
+    is_stockout_confirmed,
 )
 
 # ============================================
@@ -807,7 +808,58 @@ def _write_stockout_section(
     start_row: int,
     stockout_info_list: list[StockoutEntry],
 ) -> int:
-    """欠品情報セクションを書き込む。"""
+    """欠品情報セクションを書き込む（入荷確定 + 欠品継続の2グループ）。"""
+    confirmed = [i for i in stockout_info_list if is_stockout_confirmed(i)]
+    pending = [i for i in stockout_info_list if not is_stockout_confirmed(i)]
+
+    row = start_row
+    if confirmed:
+        row = _write_stockout_confirmed(ws, row, confirmed)
+    if pending:
+        row = _write_stockout_pending(ws, row, pending)
+    return row
+
+
+def _write_stockout_confirmed(
+    ws: Worksheet,
+    start_row: int,
+    items: list[StockoutEntry],
+) -> int:
+    """入荷確定グループを書き込む。"""
+    from nouki_kaitou.utils import format_quantity
+
+    row = start_row
+    ws.merge_cells(f"A{row}:G{row}")
+    cell = ws.cell(row=row, column=1)
+    cell.value = "    欠品しておりました商品の入荷日が確定いたしました。"
+    cell.font = _make_font(size=11, bold=True, color="338833")
+    ws.row_dimensions[row].height = 24
+    row += 1
+
+    for item in items:
+        text = (
+            f"        - {item.manufacturer_name}  {item.product_name}"
+            f"  x{format_quantity(item.quantity)}"
+            f" → {item.delivery}"
+        )
+        ws.merge_cells(f"A{row}:G{row}")
+        cell = ws.cell(row=row, column=1)
+        cell.value = text
+        cell.font = _make_font(size=10, bold=True, color="338833")
+        ws.row_dimensions[row].height = 20
+        row += 1
+
+    return row
+
+
+def _write_stockout_pending(
+    ws: Worksheet,
+    start_row: int,
+    items: list[StockoutEntry],
+) -> int:
+    """欠品継続グループを書き込む。"""
+    from nouki_kaitou.utils import format_quantity
+
     row = start_row
     ws.merge_cells(f"A{row}:G{row}")
     cell = ws.cell(row=row, column=1)
@@ -816,9 +868,11 @@ def _write_stockout_section(
     ws.row_dimensions[row].height = 24
     row += 1
 
-    for item in stockout_info_list:
-        from nouki_kaitou.utils import format_quantity
-        text = f"        - {item.manufacturer_name}  {item.product_name}  x{format_quantity(item.quantity)}"
+    for item in items:
+        text = (
+            f"        - {item.manufacturer_name}  {item.product_name}"
+            f"  x{format_quantity(item.quantity)}"
+        )
         if item.approx_delivery:
             text += f" → {item.approx_delivery}"
         else:

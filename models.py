@@ -221,6 +221,19 @@ class StockoutEntry:
     order_number: str = ""        # 注番（グループ化用）
 
 
+# 欠品の入荷確定判定（email_builder / excel_writer 共用）
+_UNCONFIRMED_DELIVERY = ("欠品中", "確認中", "日程調整中")
+
+
+def is_stockout_confirmed(item: StockoutEntry) -> bool:
+    """欠品の入荷日が確定しているか判定する。"""
+    return bool(
+        item.delivery
+        and item.delivery not in _UNCONFIRMED_DELIVERY
+        and "（欠品）" not in item.delivery
+    )
+
+
 # ============================================
 # 確定/確認中の伝票（送付履歴・確認中一覧書き込み用）
 # ============================================
