@@ -302,7 +302,7 @@ class TestBuildEmailBodyHtmlStockout:
         assert "入荷次第ご連絡" in result
 
     def test_stockout_confirmed_delivery(self):
-        """確定納期あり → 確定納期を表示"""
+        """確定納期あり → 入荷確定セクションに表示"""
         branch = BranchSettings(name="テスト")
         stockout = [
             StockoutEntry(
@@ -315,11 +315,13 @@ class TestBuildEmailBodyHtmlStockout:
         result = build_email_body_html(
             "テスト", branch, stockout_info_list=stockout,
         )
+        assert "入荷日が確定" in result
         assert "1月20日出荷予定" in result
+        assert "欠品中の商品について" not in result
         assert "入荷次第ご連絡" not in result
 
     def test_stockout_confirmed_delivery_removes_keppin_marker(self):
-        """確定納期の「（欠品）」マーカーが除去される"""
+        """（欠品）マーカー付き → 欠品継続セクションで表示、マーカー除去"""
         branch = BranchSettings(name="テスト")
         stockout = [
             StockoutEntry(
@@ -332,12 +334,13 @@ class TestBuildEmailBodyHtmlStockout:
         result = build_email_body_html(
             "テスト", branch, stockout_info_list=stockout,
         )
+        assert "欠品中の商品について" in result
         assert "1月20日出荷予定" in result
         assert "（欠品）" not in result
         assert "入荷次第ご連絡" not in result
 
-    def test_stockout_approx_over_confirmed(self):
-        """approxとdelivery両方あり → approx優先"""
+    def test_stockout_confirmed_over_approx(self):
+        """確定日付とapprox両方あり → 入荷確定セクションに確定日付表示"""
         branch = BranchSettings(name="テスト")
         stockout = [
             StockoutEntry(
@@ -351,8 +354,9 @@ class TestBuildEmailBodyHtmlStockout:
         result = build_email_body_html(
             "テスト", branch, stockout_info_list=stockout,
         )
-        assert "3月上旬入荷予定" in result
-        assert "1月20日出荷予定" not in result
+        assert "入荷日が確定" in result
+        assert "1月20日出荷予定" in result
+        assert "3月上旬入荷予定" not in result
 
     def test_stockout_delivery_keppin_shows_nyuka_shidai(self):
         """delivery="欠品中" → 入荷次第ご連絡"""
@@ -391,6 +395,74 @@ class TestBuildEmailBodyHtmlStockout:
         branch = BranchSettings(name="テスト")
         result = build_email_body_html("テスト", branch)
         assert "欠品中の商品について" not in result
+
+    def test_stockout_mixed_confirmed_and_pending(self):
+        """入荷確定と欠品継続が混在 → 両セクション表示"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーA",
+                product_name="確定品",
+                quantity="10",
+                delivery="3月5日配達予定",
+            ),
+            StockoutEntry(
+                manufacturer_name="メーカーB",
+                product_name="欠品品",
+                quantity="20",
+                delivery="欠品中",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        # 入荷確定セクション
+        assert "入荷日が確定" in result
+        assert "メーカーA" in result
+        assert "3月5日配達予定" in result
+        # 欠品継続セクション
+        assert "欠品中の商品について" in result
+        assert "メーカーB" in result
+        assert "入荷次第ご連絡" in result
+        # 入荷確定セクションが先に表示される
+        confirmed_pos = result.index("入荷日が確定")
+        pending_pos = result.index("欠品中の商品について")
+        assert confirmed_pos < pending_pos
+
+    def test_stockout_only_confirmed(self):
+        """全て入荷確定 → 欠品継続セクションなし"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーA",
+                product_name="確定品",
+                quantity="10",
+                delivery="3月5日配達予定",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "入荷日が確定" in result
+        assert "欠品中の商品について" not in result
+
+    def test_stockout_only_pending(self):
+        """全て欠品継続 → 入荷確定セクションなし"""
+        branch = BranchSettings(name="テスト")
+        stockout = [
+            StockoutEntry(
+                manufacturer_name="メーカーB",
+                product_name="欠品品",
+                quantity="20",
+                approx_delivery="3月上旬入荷予定",
+            ),
+        ]
+        result = build_email_body_html(
+            "テスト", branch, stockout_info_list=stockout,
+        )
+        assert "入荷日が確定" not in result
+        assert "欠品中の商品について" in result
+        assert "3月上旬入荷予定" in result
 
 
 # ============================================

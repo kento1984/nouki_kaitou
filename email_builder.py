@@ -377,13 +377,73 @@ def _build_tracking_section(
     return "".join(parts)
 
 
+_UNCONFIRMED_DELIVERY = ("欠品中", "確認中", "日程調整中")
+
+
+def _is_stockout_confirmed(item: StockoutEntry) -> bool:
+    """欠品の入荷日が確定しているか判定する。"""
+    return bool(
+        item.delivery
+        and item.delivery not in _UNCONFIRMED_DELIVERY
+        and "（欠品）" not in item.delivery
+    )
+
+
 def _build_stockout_section(
     stockout_info_list: list[StockoutEntry],
 ) -> str:
-    """欠品情報セクション"""
-    h = html_escape
-    parts: list[str] = []
+    """欠品情報セクション（入荷確定 + 欠品継続の2グループ）"""
+    confirmed = [i for i in stockout_info_list if _is_stockout_confirmed(i)]
+    pending = [i for i in stockout_info_list if not _is_stockout_confirmed(i)]
 
+    parts: list[str] = []
+    if confirmed:
+        parts.append(_build_stockout_confirmed_section(confirmed))
+    if pending:
+        parts.append(_build_stockout_pending_section(pending))
+    return "".join(parts)
+
+
+def _build_stockout_confirmed_section(
+    items: list[StockoutEntry],
+) -> str:
+    """入荷確定グループのセクション"""
+    h = html_escape
+    from nouki_kaitou.utils import format_quantity
+
+    parts: list[str] = []
+    parts.append(
+        "<div style='margin: 15px 0; padding: 12px; "
+        "background-color: #f0f7f0; border-left: 4px solid #338833;'>"
+    )
+    parts.append(
+        "<div style='font-weight: bold; color: #338833; font-size: 15px; "
+        "margin-bottom: 8px;'>"
+        "欠品しておりました商品の入荷日が確定いたしました。</div>"
+    )
+
+    for item in items:
+        base_text = (
+            f"・{h(item.manufacturer_name)}  {h(item.product_name)}"
+            f"  x{format_quantity(item.quantity)}"
+        )
+        parts.append(
+            f"<div style='margin-left: 20px; font-weight: bold;'>"
+            f"{base_text} → {h(item.delivery)}</div>"
+        )
+
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _build_stockout_pending_section(
+    items: list[StockoutEntry],
+) -> str:
+    """欠品継続グループのセクション（従来の欠品セクション）"""
+    h = html_escape
+    from nouki_kaitou.utils import format_quantity
+
+    parts: list[str] = []
     parts.append(
         "<div style='margin: 15px 0; padding: 12px; "
         "background-color: #fff0f0; border-left: 4px solid #cc0000;'>"
@@ -397,21 +457,19 @@ def _build_stockout_section(
         "下記商品は現在欠品中です。ご迷惑をおかけし申し訳ございません。</div>"
     )
 
-    for item in stockout_info_list:
-        from nouki_kaitou.utils import format_quantity
+    for item in items:
         base_text = (
             f"・{h(item.manufacturer_name)}  {h(item.product_name)}"
             f"  x{format_quantity(item.quantity)}"
         )
 
-        # 表示優先順位：アバウト納期 > 確定納期 > 入荷次第ご連絡
         if item.approx_delivery:
             delivery_text = h(item.approx_delivery)
-        elif not item.delivery or item.delivery in ("欠品中", "確認中"):
-            delivery_text = "入荷次第ご連絡"
-        else:
-            # 確定日付がある場合（確認中一覧で手入力された納期等）
+        elif item.delivery and item.delivery not in _UNCONFIRMED_DELIVERY:
+            # （欠品）付き日付 → マーカー除去して表示
             delivery_text = h(item.delivery.replace("（欠品）", ""))
+        else:
+            delivery_text = "入荷次第ご連絡"
 
         parts.append(
             f"<div style='margin-left: 20px; color: #cc0000; "
