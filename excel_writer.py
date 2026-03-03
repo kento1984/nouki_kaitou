@@ -298,7 +298,12 @@ def copy_data_row(
     """
     ws.cell(row=target_row, column=1).value = report_row.registration_date
     ws.cell(row=target_row, column=2).value = report_row.customer_contact
-    ws.cell(row=target_row, column=3).value = report_row.customer_order_number
+    cust_order = report_row.customer_order_number
+    if isinstance(cust_order, str) and cust_order.strip().isdigit():
+        ws.cell(row=target_row, column=3).value = int(cust_order.strip())
+    else:
+        ws.cell(row=target_row, column=3).value = cust_order
+    ws.cell(row=target_row, column=3).alignment = Alignment(horizontal="left")
     ws.cell(row=target_row, column=4).value = report_row.manufacturer_name
     ws.cell(row=target_row, column=5).value = report_row.product_name
     ws.cell(row=target_row, column=6).value = _to_numeric(report_row.quantity)
