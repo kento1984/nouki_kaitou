@@ -340,7 +340,7 @@ class TestSendaiStockCompleted:
         assert "他拠点より" in result
 
     def test_other_branch_stock_before_cutoff(self):
-        """他拠点: cutoff1前 → 当日出荷"""
+        """他拠点: branch.default_cutoff(15時)前 → 当日出荷"""
         row = _make_row(time_value="10:00:00", storage_place="関東商品センター")
         cache = _make_cache("近隣2便")
         result = check_sendai_stock_completed(
@@ -349,9 +349,9 @@ class TestSendaiStockCompleted:
         )
         assert result == format_date_japanese(TODAY) + "他拠点より出荷済み"
 
-    def test_other_branch_stock_after_cutoff(self):
-        """他拠点: cutoff1後 → 翌営業日出荷"""
-        row = _make_row(time_value="12:00:00", storage_place="関東商品センター")
+    def test_other_branch_stock_after_branch_cutoff(self):
+        """他拠点: branch.default_cutoff(15時)後 → 翌営業日出荷"""
+        row = _make_row(time_value="15:00:00", storage_place="関東商品センター")
         cache = _make_cache("近隣2便")
         expected_date = datetime.date(2026, 2, 24)
         result = check_sendai_stock_completed(
@@ -360,10 +360,21 @@ class TestSendaiStockCompleted:
         )
         assert result == format_date_japanese(expected_date) + "他拠点より出荷予定"
 
+    def test_other_branch_stock_between_pattern_and_branch_cutoff(self):
+        """他拠点: pattern.cutoff1(11:30)後だがbranch(15時)前 → 当日出荷
+        出荷可否はセンターの締切で判定するため、配達ルートの11:30は無関係"""
+        row = _make_row(time_value="14:00:00", storage_place="関東商品センター")
+        cache = _make_cache("近隣2便")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "関東商品センター", False,
+        )
+        assert result == format_date_japanese(TODAY) + "他拠点より出荷済み"
+
     # --- 受注先≠出荷先 ---
 
     def test_ship_rule(self):
-        """仙台+受注先≠出荷先 → 出荷予定"""
+        """仙台+受注先≠出荷先: branch.default_cutoff(15時)前 → 当日出荷"""
         row = _make_row(time_value="10:00:00")
         cache = _make_cache("近隣2便")
         result = check_sendai_stock_completed(
@@ -372,9 +383,9 @@ class TestSendaiStockCompleted:
         )
         assert result == format_date_japanese(TODAY) + "出荷済み"
 
-    def test_ship_rule_after_cutoff(self):
-        """受注先≠出荷先: cutoff1後 → 翌営業日出荷"""
-        row = _make_row(time_value="12:00:00")
+    def test_ship_rule_after_branch_cutoff(self):
+        """受注先≠出荷先: branch.default_cutoff(15時)後 → 翌営業日出荷"""
+        row = _make_row(time_value="15:00:00")
         cache = _make_cache("近隣2便")
         expected_date = datetime.date(2026, 2, 24)
         result = check_sendai_stock_completed(
@@ -382,6 +393,16 @@ class TestSendaiStockCompleted:
             "東北商品センター", True,
         )
         assert result == format_date_japanese(expected_date) + "出荷予定"
+
+    def test_ship_rule_between_pattern_and_branch_cutoff(self):
+        """受注先≠出荷先: pattern.cutoff1(11:30)後だがbranch(15時)前 → 当日出荷"""
+        row = _make_row(time_value="14:00:00")
+        cache = _make_cache("近隣2便")
+        result = check_sendai_stock_completed(
+            row, cache, {}, SENDAI_BRANCH, TODAY,
+            "東北商品センター", True,
+        )
+        assert result == format_date_japanese(TODAY) + "出荷済み"
 
     # --- 曜日制限 ---
 

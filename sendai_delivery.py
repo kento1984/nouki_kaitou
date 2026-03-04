@@ -126,9 +126,12 @@ def check_sendai_stock_completed(
         return None
 
     # 6. 他支店在庫
+    # 出荷可否はセンターの締切（branch.default_cutoff）で判定する。
+    # pattern.cutoff1は配達ルートの便の締切であり、出荷能力とは無関係。
+    branch_cutoff = (branch.default_cutoff, 0)
     base_center = branch.base_center
     if base_center and storage_place and storage_place != base_center:
-        if _before_cutoff_hm(hour, minute, pattern.cutoff1):
+        if _before_cutoff_hm(hour, minute, branch_cutoff):
             ship_date = reg_date
         else:
             ship_date = add_business_days(reg_date, 1, holidays)
@@ -138,7 +141,7 @@ def check_sendai_stock_completed(
 
     # 7. use_ship_rule（受注先≠出荷先 or 路線便）
     if use_ship_rule:
-        if _before_cutoff_hm(hour, minute, pattern.cutoff1):
+        if _before_cutoff_hm(hour, minute, branch_cutoff):
             ship_date = reg_date
         else:
             ship_date = add_business_days(reg_date, 1, holidays)
