@@ -99,7 +99,7 @@ def load_branch_settings(
             order_num = str(row[order_col]).strip()
             if order_num and len(order_num) >= 2:
                 first_two = order_num[:2]
-                if re.match(r"^[A-Z]{2}$", first_two):
+                if re.match(r"^[A-Z][A-Z0-9]$", first_two):
                     branch_code = first_two
                     break
 

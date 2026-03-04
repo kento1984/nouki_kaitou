@@ -175,6 +175,67 @@ class TestLoadBranchSettings:
         settings = load_branch_settings(wb, source, cols)
         assert settings.name == ""
 
+    def test_alphanumeric_branch_code_d2(self):
+        """英字+数字の注番コード D2（仙台営業所）がマッチすること"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日"],
+            ["D2", "仙台営業所", 15, "東北商品センター", "sendai@mac-exe.co.jp", None],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("D21K361949")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.name == "仙台営業所"
+        assert settings.base_center == "東北商品センター"
+
+    def test_alphanumeric_branch_code_g2(self):
+        """英字+数字の注番コード G2（さいたま営業所）がマッチすること"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日"],
+            ["G2", "さいたま営業所", 15, "関東商品センター", None, None],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("G21X000001")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.name == "さいたま営業所"
+
+    def test_two_letter_code_still_works(self):
+        """英字2文字の注番コード GL（京葉営業所）が引き続きマッチすること"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日"],
+            ["GL", "京葉営業所", 15, "関東商品センター", "keiyou@mac-exe.co.jp", None],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("GL2Z444369")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.name == "京葉営業所"
+
+    def test_two_digit_code_does_not_match(self):
+        """数字2文字の注番はマッチしないこと"""
+        branch_data = [
+            ["コード", "営業所名", "締切", "センター", "メール", "開始日"],
+            ["12", "テスト営業所", 15, "テストセンター", None, None],
+        ]
+        branch_ws = MockWorksheet(branch_data)
+        wb = MockWorkbook({"営業所設定": branch_ws})
+
+        cols = {"受発注伝票": 0}
+        source = self._make_source_data("12345678")
+
+        settings = load_branch_settings(wb, source, cols)
+        assert settings.name == ""
+
     def test_no_order_col(self):
         """受発注伝票列がない場合→デフォルト"""
         wb = MockWorkbook({})
