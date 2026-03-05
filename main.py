@@ -774,13 +774,24 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
             all_confirmed.extend(result.confirmed_orders)
             all_confirming.extend(result.confirming_orders)
 
-        has_updates = bool(all_confirmed or all_confirming)
+        # SAPで明細削除された伝票を確認中一覧から除去するためのキー収集
+        deleted_keys: set[str] = set()
+        for order in orders:
+            if order.rejection_reason.strip() == "明細削除":
+                key = f"{order.order_number}|{order.detail_number}"
+                if key in cache.confirm:
+                    deleted_keys.add(key)
+        if deleted_keys:
+            print(f"明細削除（確認中一覧から除去）: {len(deleted_keys)}件")
+
+        has_updates = bool(all_confirmed or all_confirming or deleted_keys)
         if has_updates:
             t_save = time.perf_counter()
             save_history_batch(
                 str(history_path), history_rows, confirming_rows,
                 all_confirmed, all_confirming,
                 execution_time, args.sender,
+                deleted_keys=deleted_keys,
             )
             save_elapsed = time.perf_counter() - t_save
             print(f"送付履歴保存: {history_path} ({save_elapsed:.2f}s)")

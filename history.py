@@ -690,6 +690,7 @@ def save_history_batch(
     sender: str = "",
     days_to_keep: int = 180,
     today: datetime.date | None = None,
+    deleted_keys: set[str] | None = None,
 ) -> None:
     """送付履歴ファイルの全更新を1回のバッチで実行する。
 
@@ -706,6 +707,8 @@ def save_history_batch(
         sender: 送付者名
         days_to_keep: 保持日数（デフォルト180日）
         today: 基準日（テスト用）
+        deleted_keys: SAPで明細削除された伝票のキーセット（"注番|明細"形式）。
+            確認中一覧に存在すれば除去する。送付履歴には移動しない。
     """
     if today is None:
         today = datetime.date.today()
@@ -734,6 +737,16 @@ def save_history_batch(
             else:
                 keep_conf.append(row)
         conf_rows = keep_conf
+
+    # --- ステップ1.5: SAPで明細削除された伝票を確認中一覧から除去 ---
+    # confirmed_keysで既に除去済みのキーは対象外（ステップ1で処理済み）
+    # 送付履歴には移動しない（明細削除は回答ではなく注文の取消し）
+    if deleted_keys:
+        conf_rows = [
+            row for row in conf_rows
+            if f"{str(row[3] or '').strip()}|{str(row[4] or '').strip()}"
+            not in deleted_keys
+        ]
 
     # --- ステップ2: 確認中一覧に new_confirming を追加（重複時はステータス更新） ---
     if new_confirming:

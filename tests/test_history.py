@@ -1359,3 +1359,269 @@ class TestSaveHistoryBatch:
             wb.close()
         finally:
             os.unlink(path)
+
+
+# ============================================
+# save_history_batch: deleted_keys（明細削除の自動除去）
+# ============================================
+class TestSaveHistoryBatchDeletedKeys:
+    """SAPで明細削除された伝票を確認中一覧から自動除去するテスト"""
+
+    def _make_confirming_row(
+        self, order_num, detail_num, inquiry="未", status="確認中",
+        order_delivery=None,
+    ):
+        """確認中一覧の1行データを作成するヘルパー"""
+        return [
+            datetime.datetime(2026, 3, 1, 10, 0),
+            datetime.date(2026, 2, 25),
+            "テスト顧客", order_num, detail_num,
+            "メーカーA", "製品A", inquiry, status, order_delivery, "test",
+        ]
+
+    def test_deleted_key_removed_from_confirming(self):
+        """パターン1: 明細削除 + 確認中一覧にキーあり → 除去される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row("12345", 10),
+                self._make_confirming_row("99999", 20),
+            ]
+
+            # 12345|10 が明細削除
+            deleted = {"12345|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            # 99999|20 だけ残る
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=3, column=4).value is None
+
+            # 送付履歴には移動していない
+            ws_h = wb[HISTORY_SHEET_NAME]
+            assert ws_h.cell(row=2, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_deleted_key_not_in_confirming(self):
+        """パターン2: 明細削除 + 確認中一覧にキーなし → 何も起きない"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row("99999", 20),
+            ]
+
+            # 存在しないキーを削除
+            deleted = {"77777|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            # 既存行はそのまま残る
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_deleted_keys_only_no_confirmed_no_confirming(self):
+        """パターン3: deleted_keysのみ（confirmed/confirming空） → 除去される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row("12345", 10),
+                self._make_confirming_row("99999", 20),
+            ]
+
+            # confirmed/confirming は空、deleted_keys のみ
+            deleted = {"12345|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=3, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_key_in_both_confirmed_and_deleted(self):
+        """パターン4: 同じキーがconfirmed_keysとdeleted_keysの両方 → ステップ1で処理、二重処理なし"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row("12345", 10),
+                self._make_confirming_row("99999", 20),
+            ]
+
+            # 12345|10 が confirmed（送付履歴へ移動）かつ deleted にも含まれる
+            confirmed = [
+                HistoryRecord(
+                    order_number="12345",
+                    detail_number="10",
+                    delivery_answer="2/17出荷予定",
+                    customer_name="テスト顧客",
+                ),
+            ]
+            deleted = {"12345|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, confirmed, [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+
+            # 送付履歴に移動されている（ステップ1で処理）
+            ws_h = wb[HISTORY_SHEET_NAME]
+            assert ws_h.cell(row=2, column=4).value == "12345"
+            assert ws_h.cell(row=2, column=8).value == "2/17出荷予定"
+
+            # 確認中一覧には99999だけ残る
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=3, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_non_deleted_rejection_reason_not_collected(self):
+        """パターン5: deleted_keysが空set → 確認中一覧は変更されない"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row("12345", 10),
+            ]
+
+            # 空set（明細削除以外は収集されない）
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=set(),
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value == "12345"
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_unexpected_document_type_still_removed(self):
+        """パターン6: 伝票タイプに関係なくキーが一致すれば除去される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            # 確認中一覧にはキーだけで伝票タイプ情報はない
+            existing_confirming = [
+                self._make_confirming_row("12345", 10),
+            ]
+
+            # 伝票タイプが何であれ、キーが一致すれば除去される
+            deleted = {"12345|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_excluded_inquiry_status_still_removed(self):
+        """パターン7: 問合せ状況が「除外」の確認中エントリも明細削除で除去される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row("12345", 10, inquiry="除外"),
+                self._make_confirming_row("99999", 20),
+            ]
+
+            deleted = {"12345|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=3, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
+
+    def test_user_entered_delivery_date_still_removed(self):
+        """パターン8: ユーザー手入力の受注納期がある確認中エントリも明細削除で除去される"""
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            path = f.name
+        try:
+            exec_time = datetime.datetime(2026, 3, 6, 10, 0)
+            today = datetime.date(2026, 3, 6)
+
+            existing_confirming = [
+                self._make_confirming_row(
+                    "12345", 10,
+                    order_delivery=datetime.date(2026, 3, 15),
+                ),
+                self._make_confirming_row("99999", 20),
+            ]
+
+            deleted = {"12345|10"}
+
+            save_history_batch(
+                path, [], existing_confirming, [], [],
+                exec_time, today=today, deleted_keys=deleted,
+            )
+
+            wb = load_workbook(path)
+            ws_c = wb[CONFIRMING_SHEET_NAME]
+            assert ws_c.cell(row=2, column=4).value == "99999"
+            assert ws_c.cell(row=3, column=4).value is None
+            wb.close()
+        finally:
+            os.unlink(path)
