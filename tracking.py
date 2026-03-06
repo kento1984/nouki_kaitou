@@ -189,6 +189,15 @@ def get_tracking_url(carrier_name: str, tracking_num: str) -> str:
     if "第一貨物" in carrier_name:
         return "https://www.daiichi-kamotsu.co.jp/chase/contact_num/"
 
+    if "近物" in carrier_name:
+        return "https://www.kinbutsurex.co.jp/tracking"
+
+    if "新潟" in carrier_name:
+        return "https://www.niigataunyu.co.jp/tracking/"
+
+    if "名鉄" in carrier_name:
+        return "https://ap.meitetsuunyu.co.jp/webtrace/webtsuiseki/webtsuiseki.aspx"
+
     return ""
 
 

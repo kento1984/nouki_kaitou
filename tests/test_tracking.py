@@ -34,6 +34,9 @@ class TestGetCarrierFullName:
         ("ＪＰロジ", "JPロジスティクス"),
         ("第一貨物", "第一貨物"),
         ("第一", "第一貨物"),
+        ("近物", "近物レックス"),
+        ("新潟", "新潟運輸"),
+        ("名鉄", "名鉄運輸"),
     ])
     def test_known_carriers(self, short, expected):
         assert get_carrier_full_name(short) == expected
@@ -164,6 +167,21 @@ class TestExtractTrackingInfo:
         assert len(result) == 1
         assert result[0].carrier_name == "第一貨物"
 
+    def test_kinbutsu(self):
+        result = extract_tracking_info("近物:1234567890")
+        assert len(result) == 1
+        assert result[0].carrier_name == "近物レックス"
+
+    def test_niigata(self):
+        result = extract_tracking_info("新潟:1234567890")
+        assert len(result) == 1
+        assert result[0].carrier_name == "新潟運輸"
+
+    def test_meitetsu(self):
+        result = extract_tracking_info("名鉄:1234567890")
+        assert len(result) == 1
+        assert result[0].carrier_name == "名鉄運輸"
+
 
 # ============================================
 # GetTrackingUrl
@@ -211,6 +229,18 @@ class TestGetTrackingUrl:
         url = get_tracking_url("第一貨物", "1234567890")
         assert "daiichi-kamotsu.co.jp" in url
 
+    def test_kinbutsu(self):
+        url = get_tracking_url("近物レックス", "1234567890")
+        assert url == "https://www.kinbutsurex.co.jp/tracking"
+
+    def test_niigata(self):
+        url = get_tracking_url("新潟運輸", "1234567890")
+        assert url == "https://www.niigataunyu.co.jp/tracking/"
+
+    def test_meitetsu(self):
+        url = get_tracking_url("名鉄運輸", "1234567890")
+        assert "meitetsuunyu.co.jp" in url
+
     def test_unknown(self):
         url = get_tracking_url("不明な運送会社", "1234567890")
         assert url == ""
@@ -236,6 +266,9 @@ class TestCanDirectTrack:
         ("セイノースーパーエクスプレス", False),
         ("JPロジスティクス", False),
         ("第一貨物", False),
+        ("近物レックス", False),
+        ("新潟運輸", False),
+        ("名鉄運輸", False),
         ("不明な運送会社", False),
     ])
     def test_direct_track(self, carrier, expected):

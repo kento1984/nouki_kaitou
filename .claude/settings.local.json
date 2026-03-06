@@ -23,7 +23,10 @@
       "Bash(npx skills:*)",
       "Bash(python3:*)",
       "Bash(copy:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "WebSearch",
+      "WebFetch(domain:www.niigataunyu.co.jp)",
+      "WebFetch(domain:www2.nuis.co.jp)"
     ]
   }
 }
