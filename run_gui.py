@@ -58,19 +58,18 @@ def main():
     print("SAPの受注一覧を選択してください...")
     print()
 
-    try:
-        # ファイル選択ダイアログ
-        source = select_source_file()
-        if not source:
-            print("キャンセルされました。")
-            input("\nEnterキーで終了...")
-            sys.exit(0)
+    # ファイル選択ダイアログ
+    source = select_source_file()
+    if not source:
+        print("キャンセルされました。")
+        input("\nEnterキーで終了...")
+        return
 
-        # main.main() を --source 付きで呼び出す
-        sys.argv = ["nouki_kaitou", "--source", source]
+    # main.main() を --source 付きで呼び出す
+    sys.argv = ["nouki_kaitou", "--source", source]
+    try:
         app_main()
     except SystemExit:
-        # sys.exit()はキャッチしてからinput()で待機
         input("\nEnterキーで終了...")
         raise
     except Exception as e:
