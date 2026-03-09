@@ -169,7 +169,7 @@ def create_emails(
     cache: Optional[CacheStore] = None,
     send_directly: bool = False,
     today: Optional[datetime.date] = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[str]]:
     """メールデータを作成する。
 
     VBAではOutlook COM連携で直接メール送信していたが、
@@ -194,14 +194,14 @@ def create_emails(
         today: 基準日（テスト用）
 
     Returns:
-        メールデータのリスト。各要素は辞書:
+        (メールデータのリスト, スキップされた顧客名のリスト) のタプル。
+        メールデータの各要素は辞書:
             - to: 宛先メールアドレス
             - subject: 件名
             - html_body: HTML本文
             - attachments: 添付ファイルパスのリスト
             - shared_email: 共有メールアドレス（差出人）
             - send_directly: 送信/下書きフラグ
-        スキップされた顧客は含まれない。
     """
     from nouki_kaitou.customer import get_email_addresses
 
@@ -257,7 +257,7 @@ def create_emails(
             "customer_name": customer_name,
         })
 
-    return results
+    return results, skipped_customers
 
 
 # ============================================

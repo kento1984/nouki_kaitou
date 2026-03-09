@@ -39,7 +39,18 @@ def main():
     """エントリポイント。"""
     # --source が既にある場合（バッチ等からの呼び出し）はそのままmainへ
     if "--source" in sys.argv:
-        app_main()
+        try:
+            app_main()
+        except SystemExit:
+            input("\nEnterキーで終了...")
+            raise
+        except Exception as e:
+            print(f"\nエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+            input("\nEnterキーで終了...")
+            sys.exit(1)
+        input("\nEnterキーで終了...")
         return
 
     # コンソールに案内表示
@@ -47,15 +58,29 @@ def main():
     print("SAPの受注一覧を選択してください...")
     print()
 
-    # ファイル選択ダイアログ
-    source = select_source_file()
-    if not source:
-        print("キャンセルされました。")
-        sys.exit(0)
+    try:
+        # ファイル選択ダイアログ
+        source = select_source_file()
+        if not source:
+            print("キャンセルされました。")
+            input("\nEnterキーで終了...")
+            sys.exit(0)
 
-    # main.main() を --source 付きで呼び出す
-    sys.argv = ["nouki_kaitou", "--source", source]
-    app_main()
+        # main.main() を --source 付きで呼び出す
+        sys.argv = ["nouki_kaitou", "--source", source]
+        app_main()
+    except SystemExit:
+        # sys.exit()はキャッチしてからinput()で待機
+        input("\nEnterキーで終了...")
+        raise
+    except Exception as e:
+        print(f"\nエラーが発生しました: {e}")
+        import traceback
+        traceback.print_exc()
+        input("\nEnterキーで終了...")
+        sys.exit(1)
+
+    input("\nEnterキーで終了...")
 
 
 if __name__ == "__main__":

@@ -1076,7 +1076,7 @@ class TestReportToEmailIntegration:
             "bunno_completed_list": [],
         }]
 
-        emails = create_emails(
+        emails, skipped = create_emails(
             created_files, BRANCH,
             customer_master_ws=ws_master,
             today=TODAY,
@@ -1084,6 +1084,7 @@ class TestReportToEmailIntegration:
         assert len(emails) == 1
         assert "test@example.com" in emails[0]["to"]
         assert "テスト商事" in emails[0]["subject"]
+        assert skipped == []
 
     def test_create_emails_no_email_skips(self, tmp_path):
         """メールアドレスなし → スキップ"""
@@ -1111,12 +1112,13 @@ class TestReportToEmailIntegration:
             "bunno_completed_list": [],
         }]
 
-        emails = create_emails(
+        emails, skipped = create_emails(
             created_files, BRANCH,
             customer_master_ws=ws_master,
             today=TODAY,
         )
         assert len(emails) == 0
+        assert skipped == ["テスト商事"]
 
 
 # ============================================

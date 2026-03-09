@@ -594,7 +594,7 @@ class TestCreateEmails:
             },
         ]
 
-        results = create_emails(
+        results, skipped = create_emails(
             files, branch, cust_ws, today=datetime.date(2026, 2, 16),
         )
 
@@ -604,6 +604,7 @@ class TestCreateEmails:
         assert "<html>" in results[0]["html_body"]
         assert results[0]["attachments"] == ["/tmp/test.pdf"]
         assert results[0]["shared_email"] == "shared@test.com"
+        assert skipped == []
 
     def test_skip_no_email(self):
         """メアド未登録はスキップ"""
@@ -616,8 +617,9 @@ class TestCreateEmails:
             {"customer_name": "テスト株式会社", "file_path": "/tmp/test.pdf"},
         ]
 
-        results = create_emails(files, branch, cust_ws)
+        results, skipped = create_emails(files, branch, cust_ws)
         assert len(results) == 0
+        assert skipped == ["テスト株式会社"]
 
     def test_multiple_customers(self):
         """複数顧客"""
@@ -632,12 +634,13 @@ class TestCreateEmails:
             {"customer_name": "顧客B", "file_path": "/tmp/b.pdf"},
         ]
 
-        results = create_emails(
+        results, skipped = create_emails(
             files, branch, cust_ws, today=datetime.date(2026, 2, 16),
         )
         assert len(results) == 2
         assert results[0]["to"] == "a@test.com"
         assert results[1]["to"] == "b@test.com"
+        assert skipped == []
 
     def test_with_rep_master(self):
         """担当者マスターからメアド取得"""
@@ -663,13 +666,14 @@ class TestCreateEmails:
             },
         ]
 
-        results = create_emails(
+        results, skipped = create_emails(
             files, branch, cust_ws, rep_master_ws=rep_ws,
             today=datetime.date(2026, 2, 16),
         )
         assert len(results) == 1
         assert results[0]["to"] == "tanaka@test.com"
         assert "田中様担当分" in results[0]["subject"]
+        assert skipped == []
 
     def test_with_tracking_and_stockout(self):
         """送り状+欠品情報付きメール"""
@@ -697,20 +701,22 @@ class TestCreateEmails:
             },
         ]
 
-        results = create_emails(
+        results, skipped = create_emails(
             files, branch, cust_ws, today=datetime.date(2026, 2, 16),
         )
         assert len(results) == 1
         body = results[0]["html_body"]
         assert "送り状番号のご連絡" in body
         assert "欠品中の商品について" in body
+        assert skipped == []
 
     def test_empty_files(self):
         """空リスト"""
         branch = BranchSettings(name="テスト")
         cust_ws = self._make_customer_ws([])
-        results = create_emails([], branch, cust_ws)
+        results, skipped = create_emails([], branch, cust_ws)
         assert results == []
+        assert skipped == []
 
     def test_send_directly_flag(self):
         """send_directlyフラグが結果に反映"""
@@ -720,8 +726,9 @@ class TestCreateEmails:
         ])
         files = [{"customer_name": "テスト", "file_path": ""}]
 
-        results = create_emails(files, branch, cust_ws, send_directly=True)
+        results, skipped = create_emails(files, branch, cust_ws, send_directly=True)
         assert results[0]["send_directly"] is True
+        assert skipped == []
 
 
 # ============================================
@@ -787,3 +794,77 @@ class TestIntegration:
         assert "メーカー確認後あらためてご連絡" in result
         assert "マツモト産業株式会社" in result
         assert "</html>" in result
+
+
+# ============================================
+# create_emails — スキップ顧客の戻り値テスト
+# ============================================
+class TestCreateEmailsSkippedCustomers:
+    def _make_customer_ws(self, rows):
+        """テスト用顧客マスターシート"""
+        wb = Workbook()
+        ws = wb.active
+        ws.cell(row=1, column=1).value = "顧客名"
+        ws.cell(row=1, column=2).value = "住所"
+        ws.cell(row=1, column=3).value = "電話"
+        ws.cell(row=1, column=4).value = "担当"
+        ws.cell(row=1, column=5).value = "メール1"
+        ws.cell(row=1, column=6).value = "メール2"
+
+        for row_idx, data in enumerate(rows, 2):
+            for col_idx, val in enumerate(data, 1):
+                ws.cell(row=row_idx, column=col_idx).value = val
+
+        return ws
+
+    def test_skipped_customers_returned(self):
+        """メアド未登録の顧客名がskippedに含まれる"""
+        branch = BranchSettings(name="テスト")
+        cust_ws = self._make_customer_ws([
+            ("顧客A", "", "", "", "a@test.com", None),
+            ("顧客B", "", "", "", None, None),
+            ("顧客C", "", "", "", None, None),
+        ])
+
+        files = [
+            {"customer_name": "顧客A", "file_path": "/tmp/a.pdf"},
+            {"customer_name": "顧客B", "file_path": "/tmp/b.pdf"},
+            {"customer_name": "顧客C", "file_path": "/tmp/c.pdf"},
+        ]
+
+        results, skipped = create_emails(files, branch, cust_ws)
+        assert len(results) == 1
+        assert results[0]["to"] == "a@test.com"
+        assert skipped == ["顧客B", "顧客C"]
+
+    def test_all_skipped(self):
+        """全顧客がメアドなし"""
+        branch = BranchSettings(name="テスト")
+        cust_ws = self._make_customer_ws([
+            ("顧客A", "", "", "", None, None),
+        ])
+
+        files = [
+            {"customer_name": "顧客A", "file_path": "/tmp/a.pdf"},
+        ]
+
+        results, skipped = create_emails(files, branch, cust_ws)
+        assert len(results) == 0
+        assert skipped == ["顧客A"]
+
+    def test_none_skipped(self):
+        """全顧客にメアドあり"""
+        branch = BranchSettings(name="テスト")
+        cust_ws = self._make_customer_ws([
+            ("顧客A", "", "", "", "a@test.com", None),
+            ("顧客B", "", "", "", "b@test.com", None),
+        ])
+
+        files = [
+            {"customer_name": "顧客A", "file_path": "/tmp/a.pdf"},
+            {"customer_name": "顧客B", "file_path": "/tmp/b.pdf"},
+        ]
+
+        results, skipped = create_emails(files, branch, cust_ws)
+        assert len(results) == 2
+        assert skipped == []

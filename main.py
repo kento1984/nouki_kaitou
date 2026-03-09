@@ -807,7 +807,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
 
             created_files = [result_to_email_input(r) for r in all_results]
             cust_ws = cust_wb["顧客マスター"]
-            emails = create_emails(
+            emails, skipped_email_customers = create_emails(
                 created_files=created_files,
                 branch=branch,
                 customer_master_ws=cust_ws,
@@ -828,6 +828,14 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
                     print(f"Outlook下書き作成: {len(created)}件")
             else:
                 print("メール生成: 0件（宛先未登録等でスキップ）")
+
+            # スキップした顧客名を表示（VBA版 CreateEmails L5655-5661 相当）
+            if skipped_email_customers:
+                print()
+                print("※以下の顧客はメールアドレス未登録のためメール作成をスキップしました：")
+                for name in skipped_email_customers:
+                    print(f"  ・{name}")
+                print("  手動で送付してください。")
 
         # --- 処理結果サマリー ---
         confirmed_total = len(all_confirmed)
