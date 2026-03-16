@@ -1190,6 +1190,25 @@ class TestColorConfirmingList:
         assert ws.cell(row=4, column=1).fill.start_color.rgb == "00FFC896"  # 1週間以上
         assert ws.cell(row=5, column=1).fill.patternType is None             # 2日前
 
+    def test_price_pending(self):
+        """価格確認中 → オレンジ"""
+        today = datetime.date(2026, 2, 16)
+        wb, ws = self._make_ws([
+            (datetime.date(2026, 2, 15), "価格確認中"),
+        ])
+        color_confirming_list(ws, today=today)
+        assert ws.cell(row=2, column=1).fill.start_color.rgb == "00FFD2A0"
+
+    def test_price_pending_priority_over_age(self):
+        """価格確認中はステータス色が日数より優先"""
+        today = datetime.date(2026, 2, 16)
+        wb, ws = self._make_ws([
+            (datetime.date(2026, 2, 1), "価格確認中"),  # 15日前だが価格確認中
+        ])
+        color_confirming_list(ws, today=today)
+        # 価格確認中の色になる（1週間以上のオレンジではなく）
+        assert ws.cell(row=2, column=1).fill.start_color.rgb == "00FFD2A0"
+
 
 # ============================================
 # 統合テスト

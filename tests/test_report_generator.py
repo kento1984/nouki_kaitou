@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from nouki_kaitou.models import (
     BranchSettings,
@@ -29,6 +29,7 @@ from nouki_kaitou.report_generator import (
     _resolve_product_name,
     _resolve_delivery_place,
     _resolve_price,
+    _is_provisional_price,
     _pass_basic_filter,
     _is_excluded,
     _determine_flags,
@@ -281,6 +282,67 @@ class TestResolvePrice:
         row = _make_row(comment_internal="")
         result = _resolve_price(row, "確認中", True)
         assert result == ("500", "50000")
+
+    def test_unit_price_1_00(self):
+        """SAPの "1.00" 形式でも確認中になる"""
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        result = _resolve_price(row, "3月16日出荷済み", False)
+        assert result == ("確認中", "確認中")
+
+    def test_unit_price_1_000(self):
+        """SAPの "1.000" 形式でも確認中になる"""
+        row = _make_row(unit_price="1.000", net_amount="5.000")
+        result = _resolve_price(row, "3月16日出荷済み", False)
+        assert result == ("確認中", "確認中")
+
+    def test_dollar_overrides_provisional(self):
+        """$$があれば仮単価1でもそのまま表示"""
+        row = _make_row(unit_price="1", net_amount="5", comment_internal="$$")
+        result = _resolve_price(row, "3月16日出荷済み", False)
+        assert result == ("1", "5")
+
+    def test_fullwidth_dollar_overrides_provisional(self):
+        """＄＄（全角）でも仮単価をそのまま表示"""
+        row = _make_row(unit_price="1.00", net_amount="5.00", comment_internal="＄＄")
+        result = _resolve_price(row, "確認中", False)
+        assert result == ("1.00", "5.00")
+
+    def test_unit_price_not_1(self):
+        """正式単価は確認中にならない"""
+        row = _make_row(unit_price="100", net_amount="500")
+        result = _resolve_price(row, "3月16日出荷済み", False)
+        assert result == ("100", "500")
+
+
+# ============================================
+# _is_provisional_price
+# ============================================
+class TestIsProvisionalPrice:
+    """仮単価判定テスト"""
+
+    def test_str_1(self):
+        assert _is_provisional_price("1") is True
+
+    def test_int_1(self):
+        assert _is_provisional_price(1) is True
+
+    def test_float_1_00(self):
+        assert _is_provisional_price("1.00") is True
+
+    def test_float_1_000(self):
+        assert _is_provisional_price("1.000") is True
+
+    def test_not_1(self):
+        assert _is_provisional_price("500") is False
+
+    def test_comma_format(self):
+        assert _is_provisional_price("1,000") is False
+
+    def test_empty(self):
+        assert _is_provisional_price("") is False
+
+    def test_text(self):
+        assert _is_provisional_price("確認中") is False
 
 
 # ============================================
@@ -758,6 +820,127 @@ class TestClassifyOrder:
         assert confirming[0].status == "分納"
         assert len(confirmed) == 0
 
+    def test_price_pending_goes_to_confirming(self):
+        """仮単価1円 + 納期確定 → 確認中一覧に「価格確認中」で残る"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        cache = _make_cache()
+        _classify_order(
+            row, "3月16日出荷済み", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirmed) == 0
+        assert len(confirming) == 1
+        assert confirming[0].status == "価格確認中"
+
+    def test_price_pending_str_1(self):
+        """仮単価 "1" でも確認中一覧に残る"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1", net_amount="5")
+        cache = _make_cache()
+        _classify_order(
+            row, "2月20日配達予定", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirmed) == 0
+        assert len(confirming) == 1
+        assert confirming[0].status == "価格確認中"
+
+    def test_price_confirmed_with_dollar(self):
+        """$$あり + 仮単価1 → 確定扱い（送付履歴へ）"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(
+            unit_price="1.00", net_amount="5.00",
+            comment_internal="$$",
+        )
+        cache = _make_cache()
+        _classify_order(
+            row, "3月16日出荷済み", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirmed) == 1
+        assert len(confirming) == 0
+        assert confirmed[0].delivery_answer == "3月16日出荷済み"
+
+    def test_price_pending_normal_price_goes_to_confirmed(self):
+        """正式単価 → 通常通り送付履歴へ"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="500", net_amount="50000")
+        cache = _make_cache()
+        _classify_order(
+            row, "3月16日出荷済み", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirmed) == 1
+        assert len(confirming) == 0
+
+    def test_price_pending_with_confirming_delivery(self):
+        """納期「確認中」+ 仮単価1 → 確認中一覧「価格確認中」"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        cache = _make_cache()
+        _classify_order(
+            row, "確認中", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        # 納期も確認中だが、仮単価なので「価格確認中」が優先される
+        assert len(confirming) == 1
+        assert confirming[0].status == "価格確認中"
+
+    def test_bunno_takes_priority_over_price_pending(self):
+        """分納 + 仮単価1 → 分納が優先（価格確認中に上書きされない）"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        cache = _make_cache()
+        bunno = [BunnoEntry("50個", "2/20", ""), BunnoEntry("50個", "未定", "")]
+        _classify_order(
+            row, "分納", cache, bunno,
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirming) == 1
+        assert confirming[0].status == "分納"
+
+    def test_stockout_takes_priority_over_price_pending(self):
+        """欠品 + 仮単価1 → 欠品中が優先（価格確認中に上書きされない）"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        cache = _make_cache()
+        _classify_order(
+            row, "欠品中", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirming) == 1
+        assert confirming[0].status == "欠品中"
+
+    def test_bunno_completed_not_blocked_by_price_pending(self):
+        """分納全確定 + 仮単価1 → 分納完了が優先（送付履歴に入る）"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        cache = _make_cache()
+        bunno = [BunnoEntry("50個", "2/20", ""), BunnoEntry("50個", "2/25", "")]
+        _classify_order(
+            row, "分納", cache, bunno,
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirmed) == 1
+        assert confirmed[0].delivery_answer == "分納完了"
+
 
 # ============================================
 # create_delivery_report_by_order_numbers
@@ -1228,6 +1411,136 @@ class TestIntegration:
         # 2行（同じ注番の2明細）
         assert ws.cell(row=7, column=12).value == "100"
         assert ws.cell(row=8, column=12).value == "100"
+
+    def test_price_pending_lifecycle(self, tmp_path):
+        """価格確認中のライフサイクル統合テスト
+
+        ステップ1: 単価1円＋納期確定 → 確認中一覧に「価格確認中」
+        ステップ2: 次回実行 → sent_ordersに載らない → 再出力
+        ステップ3: 売価確定（単価≠1）→ 正式単価で出力 → 送付履歴へ
+        ステップ4: その次の実行 → sent_ordersに載っている → スキップ
+        """
+        from nouki_kaitou.history import load_delivery_history
+
+        # --- ステップ1: 仮単価で初回実行 ---
+        data_step1 = [
+            _make_row(
+                order_number="500", detail_number="10",
+                unit_price="1.00", net_amount="5.00",
+                product_name="ザ・硝フッ酸 2C 20KG",
+                # 指定納期あり → 納期は確定（「出荷済み」等になる）
+                specified_delivery_date=datetime.date(2026, 2, 10),
+            ),
+        ]
+        cache = _make_cache()
+        result1 = create_delivery_report(
+            data_step1, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            date_from=datetime.date(2026, 2, 1),
+            date_to=datetime.date(2026, 2, 28),
+            today=TODAY,
+        )
+        assert result1 is not None
+        # 確認中一覧に「価格確認中」で入る（送付履歴ではない）
+        assert len(result1.confirming_orders) == 1
+        assert result1.confirming_orders[0].status == "価格確認中"
+        assert len(result1.confirmed_orders) == 0
+        # 回答書の単価・金額は「確認中」
+        wb1 = load_workbook(result1.file_path)
+        ws1 = wb1.active
+        assert ws1.cell(row=7, column=7).value == "確認中"  # G列: 単価
+        assert ws1.cell(row=7, column=8).value == "確認中"  # H列: 金額
+        # 納期回答欄は確定した値のまま（A案）
+        delivery_val = str(ws1.cell(row=7, column=9).value or "")
+        assert "済" in delivery_val  # 「配達済み」or「出荷済み」
+
+        # --- ステップ2: 次回実行（売価まだ未確定） ---
+        # 確認中一覧に「価格確認中」がある状態をシミュレート
+        # load_delivery_historyは確認中一覧から「除外」しか読まない
+        # → 「価格確認中」はsent_ordersに載らない
+        wb_hist = Workbook()
+        ws_hist = wb_hist.active
+        ws_hist.append(["送付日時", "受注日", "顧客名", "注番",
+                        "明細", "メーカー", "品名", "ステータス"])
+
+        wb_conf = Workbook()
+        ws_conf = wb_conf.active
+        ws_conf.append(["送付日時", "受注日", "顧客名", "注番",
+                        "明細", "メーカー", "品名", "ステータス"])
+        ws_conf.append([
+            datetime.datetime(2026, 2, 16, 10, 0),
+            datetime.date(2026, 2, 16),
+            "テスト商事", "500", "10",
+            "ダイヘン", "ザ・硝フッ酸", "価格確認中",
+        ])
+
+        sent_orders2 = load_delivery_history(
+            ws_hist, ws_conf, cache, {}, TODAY,
+        )
+        # 「価格確認中」はsent_ordersに入らない
+        assert "500|10" not in sent_orders2
+
+        # sent_orders空 → 再出力される
+        result2 = create_delivery_report(
+            data_step1, "テスト商事", sent_orders2,
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            date_from=datetime.date(2026, 2, 1),
+            date_to=datetime.date(2026, 2, 28),
+            today=TODAY,
+        )
+        assert result2 is not None
+        assert len(result2.confirming_orders) == 1
+        assert result2.confirming_orders[0].status == "価格確認中"
+
+        # --- ステップ3: 売価確定（単価500円に変更） ---
+        data_step3 = [
+            _make_row(
+                order_number="500", detail_number="10",
+                unit_price="500", net_amount="2500",
+                product_name="ザ・硝フッ酸 2C 20KG",
+                specified_delivery_date=datetime.date(2026, 2, 10),
+            ),
+        ]
+        result3 = create_delivery_report(
+            data_step3, "テスト商事", sent_orders2,
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            date_from=datetime.date(2026, 2, 1),
+            date_to=datetime.date(2026, 2, 28),
+            today=TODAY,
+        )
+        assert result3 is not None
+        # 正式単価 → 送付履歴に移動（confirmed_orders）
+        assert len(result3.confirmed_orders) == 1
+        assert len(result3.confirming_orders) == 0
+        # 回答書の単価・金額は正式値
+        wb3 = load_workbook(result3.file_path)
+        ws3 = wb3.active
+        assert ws3.cell(row=7, column=7).value == 500   # G列: 単価
+        assert ws3.cell(row=7, column=8).value == 2500   # H列: 金額
+
+        # --- ステップ4: その次の実行 → スキップ ---
+        # 送付履歴にステップ3の結果が記録された状態
+        delivery_answer = result3.confirmed_orders[0].delivery_answer
+        sent_orders4 = {"500|10": delivery_answer}
+        data_step4 = [
+            _make_row(
+                order_number="500", detail_number="10",
+                unit_price="500", net_amount="2500",
+                product_name="ザ・硝フッ酸 2C 20KG",
+                specified_delivery_date=datetime.date(2026, 2, 10),
+                # registration_dateがtodayより前でスキップ判定が効く
+                registration_date=datetime.date(2026, 2, 10),
+            ),
+        ]
+        result4 = create_delivery_report(
+            data_step4, "テスト商事", sent_orders4,
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            date_from=datetime.date(2026, 2, 1),
+            date_to=datetime.date(2026, 2, 28),
+            today=TODAY,
+        )
+        # sent_ordersに載っている + registration_date < today → スキップ
+        assert result4 is None
 
 
 # ============================================

@@ -76,6 +76,7 @@ _CONFIRM_SHIP_DONE = ("FFB4B4", None)    # 出荷完了
 _CONFIRM_PARTIAL = ("C8FFD4", None)      # 一部処理済み
 _CONFIRM_STOCKOUT = ("DCC8FF", None)     # 欠品中
 _CONFIRM_BUNNO = ("C8DCFF", None)        # 分納
+_CONFIRM_PRICE_PENDING = ("FFD2A0", None)  # 価格確認中（オレンジ）
 _CONFIRM_WEEK_OLD = ("FFC896", None)     # 1週間以上
 _CONFIRM_THREE_DAYS = ("FFFFC8", None)   # 3日以上
 
@@ -1093,6 +1094,8 @@ def color_confirming_list(
             fill = _make_fill(_CONFIRM_STOCKOUT[0])
         elif status_val == "分納":
             fill = _make_fill(_CONFIRM_BUNNO[0])
+        elif status_val == "価格確認中":
+            fill = _make_fill(_CONFIRM_PRICE_PENDING[0])
         elif sent_date and (today - sent_date).days >= 7:
             fill = _make_fill(_CONFIRM_WEEK_OLD[0])
         elif sent_date and (today - sent_date).days >= 3:

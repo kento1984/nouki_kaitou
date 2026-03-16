@@ -613,6 +613,18 @@ def _resolve_delivery_place(row: OrderRow, today: datetime.date) -> str:
     return delivery_place
 
 
+def _is_provisional_price(unit_price: object) -> bool:
+    """単価が仮単価（1円）かどうか判定する。
+
+    SAPデータは "1", "1.00", "1.000" 等の形式があるため、
+    float変換で統一的に判定する。
+    """
+    try:
+        return float(str(unit_price).replace(",", "")) == 1.0
+    except (ValueError, TypeError):
+        return False
+
+
 def _resolve_price(
     row: OrderRow,
     delivery_answer: str,
@@ -627,13 +639,16 @@ def _resolve_price(
         "$$" in row.comment_internal or "＄＄" in row.comment_internal
     )
 
-    # 単価=1 or 確認中かつ$$なしかつforceDeliveredなし → 確認中表示
-    if unit_price == "1" or unit_price == 1:
+    # $$があれば仮単価でもそのまま表示（価格確定済みの明示）
+    if price_confirmed:
+        return unit_price, net_amount
+
+    # 単価=1（仮単価）→ 確認中表示（小数点付きにも対応）
+    if _is_provisional_price(unit_price):
         return "確認中", "確認中"
 
-    if (delivery_answer == "確認中"
-            and not price_confirmed
-            and not force_delivered):
+    # 納期が確認中かつforceDeliveredなし → 確認中表示
+    if delivery_answer == "確認中" and not force_delivered:
         return "確認中", "確認中"
 
     return unit_price, net_amount
@@ -871,12 +886,22 @@ def _classify_order(
         prev_confirming_status == "分納" and row.ship_status != "処理完了"
     )
 
+    # 価格確認中: 納期は確定しているが仮単価（1円）のまま
+    # $$フラグがあれば価格確定済みなので対象外
+    price_confirmed = (
+        "$$" in row.comment_internal or "＄＄" in row.comment_internal
+    )
+    is_price_pending = (
+        _is_provisional_price(row.unit_price) and not price_confirmed
+    )
+
     # 確認中一覧に追加すべきか判定
     is_confirming_type = (
         delivery_status in ("確認中", "欠品中", "日程調整中")
         or "（欠品）" in delivery_status
         or "分納" in delivery_status
         or keep_in_confirming
+        or is_price_pending
     )
 
     if is_confirming_type:
@@ -900,6 +925,9 @@ def _classify_order(
         # 欠品の場合
         elif delivery_status == "欠品中" or "（欠品）" in delivery_status:
             ship_status_for_confirm = "欠品中"
+        # 価格確認中の場合
+        elif is_price_pending:
+            ship_status_for_confirm = "価格確認中"
         else:
             ship_status_for_confirm = row.ship_status
 
