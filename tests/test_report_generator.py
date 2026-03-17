@@ -883,7 +883,7 @@ class TestClassifyOrder:
         assert len(confirming) == 0
 
     def test_price_pending_with_confirming_delivery(self):
-        """納期「確認中」+ 仮単価1 → 確認中一覧「価格確認中」"""
+        """納期「確認中」+ 仮単価1 → 既存分岐で「未処理」（価格確認中にならない）"""
         confirmed: list[HistoryRecord] = []
         confirming: list[ConfirmingRecord] = []
         row = _make_row(unit_price="1.00", net_amount="5.00")
@@ -893,9 +893,22 @@ class TestClassifyOrder:
             False, "ダイヘン", "溶接棒",
             confirmed, confirming,
         )
-        # 納期も確認中だが、仮単価なので「価格確認中」が優先される
         assert len(confirming) == 1
-        assert confirming[0].status == "価格確認中"
+        assert confirming[0].status == "未処理"
+
+    def test_price_pending_with_scheduling_delivery(self):
+        """納期「日程調整中」+ 仮単価1 → 既存分岐（価格確認中にならない）"""
+        confirmed: list[HistoryRecord] = []
+        confirming: list[ConfirmingRecord] = []
+        row = _make_row(unit_price="1.00", net_amount="5.00")
+        cache = _make_cache()
+        _classify_order(
+            row, "日程調整中", cache, [],
+            False, "ダイヘン", "溶接棒",
+            confirmed, confirming,
+        )
+        assert len(confirming) == 1
+        assert confirming[0].status == "未処理"
 
     def test_bunno_takes_priority_over_price_pending(self):
         """分納 + 仮単価1 → 分納が優先（価格確認中に上書きされない）"""

@@ -887,12 +887,20 @@ def _classify_order(
     )
 
     # 価格確認中: 納期は確定しているが仮単価（1円）のまま
+    # 納期未確定の場合は既存分岐（「未処理」等）に任せる
     # $$フラグがあれば価格確定済みなので対象外
     price_confirmed = (
         "$$" in row.comment_internal or "＄＄" in row.comment_internal
     )
+    delivery_is_undecided = (
+        delivery_status in ("確認中", "欠品中", "日程調整中")
+        or "（欠品）" in delivery_status
+        or "分納" in delivery_status
+    )
     is_price_pending = (
-        _is_provisional_price(row.unit_price) and not price_confirmed
+        _is_provisional_price(row.unit_price)
+        and not price_confirmed
+        and not delivery_is_undecided
     )
 
     # 確認中一覧に追加すべきか判定
