@@ -164,9 +164,11 @@ class TestGetColumnPositions:
     def test_normal(self):
         """正常なヘッダーから列位置を取得"""
         source = _build_source_data()
-        cols = get_column_positions(source)
+        result = get_column_positions(source)
 
-        assert cols is not None
+        assert result is not None
+        cols, header_row_idx = result
+        assert header_row_idx == 4
         assert cols["受発注伝票"] == 3
         assert cols["明細"] == 5
         assert cols["受注先"] == 9
@@ -177,8 +179,9 @@ class TestGetColumnPositions:
     def test_required_columns_present(self):
         """必須列が全て存在"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         required = ["受発注伝票", "明細", "受注先", "品名", "受注数量",
                      "出荷先名", "受注納期", "品目Group", "登録日"]
@@ -186,7 +189,7 @@ class TestGetColumnPositions:
             assert name in cols, f"必須列 '{name}' が見つからない"
 
     def test_too_few_rows(self):
-        """行数不足でNone"""
+        """ヘッダーキーワードなしでNone"""
         source = [["a", "b"]] * 3  # 3行しかない
         assert get_column_positions(source) is None
 
@@ -203,8 +206,9 @@ class TestGetColumnPositions:
         header = list(SAMPLE_HEADER) + [""] * 20 + ["明細"]
         source = [[""] * 5 for _ in range(4)] + [header]
         # 最低限の必須列を含める
-        cols = get_column_positions(source)
-        if cols is not None:
+        result = get_column_positions(source)
+        if result is not None:
+            cols, _ = result
             assert cols["明細"] == 5  # 最初のもの
 
 
@@ -215,8 +219,9 @@ class TestParseOrderRow:
     def test_normal(self):
         """正常なデータ行のパース"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         row = parse_order_row(source, 6, cols)
         assert row.order_number == "GL2Z444369"
@@ -234,8 +239,9 @@ class TestParseOrderRow:
     def test_date_parsing(self):
         """日付列のパース"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         row = parse_order_row(source, 6, cols)
         assert row.order_delivery_date == datetime.date(2026, 1, 15)
@@ -245,8 +251,9 @@ class TestParseOrderRow:
     def test_out_of_range(self):
         """範囲外の行番号"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         row = parse_order_row(source, 999, cols)
         assert row.order_number == ""
@@ -255,8 +262,9 @@ class TestParseOrderRow:
     def test_time_value(self):
         """時刻フィールド"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         row = parse_order_row(source, 6, cols)
         assert row.time_value == "8:54:58"
@@ -269,10 +277,11 @@ class TestDataRowDetection:
     def test_get_data_rows_range(self):
         """データ行範囲の取得"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
 
-        rng = get_data_rows_range(source, cols)
+        rng = get_data_rows_range(source, cols, header_row_idx)
         assert 6 in rng  # データ行（受発注伝票列に値あり）
         # 副行（行7）は受発注伝票列が空なのでlast_rowにならない
         # rangeは6〜6（最後のデータ行まで）
@@ -280,24 +289,27 @@ class TestDataRowDetection:
     def test_is_data_row_true(self):
         """データ行の判定"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         assert is_data_row(source, 6, cols) is True   # データ行
 
     def test_is_data_row_false_for_sub_row(self):
         """副行はデータ行でない"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         assert is_data_row(source, 7, cols) is False   # 副行
 
     def test_is_data_row_out_of_range(self):
         """範囲外の行"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, _ = result
 
         assert is_data_row(source, 999, cols) is False
 
@@ -314,43 +326,129 @@ class TestGroupOrderNumbersByCustomer:
     def test_normal(self):
         """顧客ごとのグループ化"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
 
-        result = group_order_numbers_by_customer(
-            source, cols, ["GL2Z444369"]
+        groups = group_order_numbers_by_customer(
+            source, cols, ["GL2Z444369"], header_row_idx
         )
-        assert "共同ガス（株）　本社" in result
-        assert "GL2Z444369" in result["共同ガス（株）　本社"]
+        assert "共同ガス（株）　本社" in groups
+        assert "GL2Z444369" in groups["共同ガス（株）　本社"]
 
     def test_not_found(self):
         """注番が見つからない場合"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
 
-        result = group_order_numbers_by_customer(
-            source, cols, ["NOTEXIST"]
+        groups = group_order_numbers_by_customer(
+            source, cols, ["NOTEXIST"], header_row_idx
         )
-        assert result == {}
+        assert groups == {}
 
     def test_no_duplicates(self):
         """同じ注番の重複なし"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
 
-        result = group_order_numbers_by_customer(
-            source, cols, ["GL2Z444369", "GL2Z444369"]
+        groups = group_order_numbers_by_customer(
+            source, cols, ["GL2Z444369", "GL2Z444369"], header_row_idx
         )
-        customer_orders = result.get("共同ガス（株）　本社", [])
+        customer_orders = groups.get("共同ガス（株）　本社", [])
         assert customer_orders.count("GL2Z444369") == 1
 
     def test_empty_order_numbers(self):
         """空の注番リスト"""
         source = _build_source_data()
-        cols = get_column_positions(source)
-        assert cols is not None
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
 
-        result = group_order_numbers_by_customer(source, cols, [])
-        assert result == {}
+        groups = group_order_numbers_by_customer(source, cols, [], header_row_idx)
+        assert groups == {}
+
+
+# ============================================
+# 新SAPフォーマット対応テスト
+# ============================================
+def _build_source_data_new_format() -> list[list[str]]:
+    """新SAPフォーマット: 1行目空行、2行目ヘッダー、3行目〜データ"""
+    rows = []
+    rows.append([""])                    # 行0: 空行
+    rows.append(SAMPLE_HEADER)           # 行1: ヘッダー
+    rows.append(SAMPLE_DATA_ROW)         # 行2: データ行
+    rows.append(SAMPLE_SUB_ROW)          # 行3: 副行
+    return rows
+
+
+class TestNewFormatHeaderDetection:
+    """新SAPフォーマット（2行目ヘッダー）の動的検出テスト"""
+
+    def test_header_found_at_row_1(self):
+        """ヘッダーが2行目（idx=1）で検出される"""
+        source = _build_source_data_new_format()
+        result = get_column_positions(source)
+
+        assert result is not None
+        cols, header_row_idx = result
+        assert header_row_idx == 1
+        assert cols["受発注伝票"] == 3
+        assert cols["品名"] == 11
+        assert cols["登録日"] == 28
+
+    def test_data_rows_range(self):
+        """データ行が3行目（idx=2）から始まる"""
+        source = _build_source_data_new_format()
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
+
+        rng = get_data_rows_range(source, cols, header_row_idx)
+        assert 2 in rng   # データ行
+        assert 0 not in rng  # 空行
+        assert 1 not in rng  # ヘッダー行
+
+    def test_parse_order_row(self):
+        """新フォーマットでもデータ行が正しくパースされる"""
+        source = _build_source_data_new_format()
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
+
+        rng = get_data_rows_range(source, cols, header_row_idx)
+        data_rows = [i for i in rng if is_data_row(source, i, cols)]
+        assert len(data_rows) == 1
+
+        row = parse_order_row(source, data_rows[0], cols)
+        assert row.order_number == "GL2Z444369"
+        assert row.customer_name == "共同ガス（株）　本社"
+        assert row.product_name == "Ｕ１２５４６－４　チップ"
+        assert row.order_delivery_date == datetime.date(2026, 1, 15)
+
+    def test_group_order_numbers(self):
+        """新フォーマットでgroup_order_numbers_by_customerが動作する"""
+        source = _build_source_data_new_format()
+        result = get_column_positions(source)
+        assert result is not None
+        cols, header_row_idx = result
+
+        groups = group_order_numbers_by_customer(
+            source, cols, ["GL2Z444369"], header_row_idx
+        )
+        assert "共同ガス（株）　本社" in groups
+
+    def test_old_format_still_works(self):
+        """旧フォーマット（5行目ヘッダー）も引き続き動作する"""
+        source = _build_source_data()
+        result = get_column_positions(source)
+
+        assert result is not None
+        cols, header_row_idx = result
+        assert header_row_idx == 4
+
+        rng = get_data_rows_range(source, cols, header_row_idx)
+        assert 6 in rng

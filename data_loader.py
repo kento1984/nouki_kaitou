@@ -94,22 +94,34 @@ _REQUIRED_COLUMNS = frozenset([
 ])
 
 
-def get_column_positions(source_data: list[list[str]]) -> ColumnMap | None:
-    """ヘッダー行（5行目、0-indexedでは4行目）から列位置を動的検索する。
+def get_column_positions(
+    source_data: list[list[str]],
+) -> tuple[ColumnMap, int] | None:
+    """ヘッダー行から列位置を動的検索する。
 
-    VBAではws.Cells(5, i)で5行目のヘッダーを走査。
-    10PM.XLSはタブ区切りなので、source_data[4]がヘッダー行。
+    先頭10行を走査して「受発注伝票」を含む行をヘッダー行とみなす。
+    旧フォーマット（5行目ヘッダー）でも新フォーマット（2行目ヘッダー）でも対応可能。
 
     Args:
         source_data: load_source_fileの返り値
 
     Returns:
-        ColumnMap（列名→列番号(0-based)）。必須列が揃わなければNone。
+        (ColumnMap, ヘッダー行インデックス) のタプル。
+        ヘッダーが見つからない、または必須列が揃わなければNone。
     """
-    if len(source_data) < 5:
+    header_row_idx: int | None = None
+    for i in range(min(10, len(source_data))):
+        for cell in source_data[i]:
+            if "受発注伝票" in cell.strip():
+                header_row_idx = i
+                break
+        if header_row_idx is not None:
+            break
+
+    if header_row_idx is None:
         return None
 
-    header_row = source_data[4]  # 5行目（0-indexed: 4）
+    header_row = source_data[header_row_idx]
     cols: ColumnMap = {}
 
     for col_idx, header_val in enumerate(header_row):
@@ -128,7 +140,7 @@ def get_column_positions(source_data: list[list[str]]) -> ColumnMap | None:
     if not _REQUIRED_COLUMNS.issubset(cols.keys()):
         return None
 
-    return cols
+    return (cols, header_row_idx)
 
 
 # ============================================
@@ -193,13 +205,13 @@ def parse_order_row(
 # データ行の判定
 # ============================================
 def get_data_rows_range(
-    source_data: list[list[str]], cols: ColumnMap
+    source_data: list[list[str]], cols: ColumnMap, header_row_idx: int
 ) -> range:
     """データ行の範囲を返す。
 
-    VBAではデータは7行目から開始（0-indexed: 6）。
-    10PM.XLSは2行で1レコード（データ行+副行）なので、
-    受発注伝票列に値がある行のみがデータ行。
+    ヘッダー行の直後からスキャンし、受発注伝票列に値がある
+    最初の行をデータ開始行とする。
+    旧フォーマット（ヘッダー後に空行1行）でも新フォーマット（ヘッダー直後がデータ）でも対応。
 
     Returns:
         有効なデータ行のrangeオブジェクト
@@ -208,15 +220,23 @@ def get_data_rows_range(
     if order_col is None:
         return range(0)
 
+    # ヘッダー直後からデータ開始行を探す
+    data_start = header_row_idx + 1
+    for i in range(header_row_idx + 1, min(header_row_idx + 5, len(source_data))):
+        row = source_data[i]
+        if order_col < len(row) and str(row[order_col]).strip():
+            data_start = i
+            break
+
     # 最終行を求める
-    last_row = 6  # 最低でも7行目（0-indexed: 6）
-    for i in range(len(source_data) - 1, 5, -1):
+    last_row = data_start
+    for i in range(len(source_data) - 1, data_start - 1, -1):
         row = source_data[i]
         if order_col < len(row) and str(row[order_col]).strip():
             last_row = i
             break
 
-    return range(6, last_row + 1)
+    return range(data_start, last_row + 1)
 
 
 def is_data_row(
@@ -248,6 +268,7 @@ def group_order_numbers_by_customer(
     source_data: list[list[str]],
     cols: ColumnMap,
     order_numbers: list[str],
+    header_row_idx: int = 4,
 ) -> dict[str, list[str]]:
     """注番リストを顧客名でグループ化する。
 
@@ -255,6 +276,7 @@ def group_order_numbers_by_customer(
         source_data: 生データ
         cols: 列位置マッピング
         order_numbers: 注番リスト
+        header_row_idx: ヘッダー行インデックス（デフォルト4=旧フォーマット）
 
     Returns:
         {顧客名: [注番リスト]}（重複なし）
@@ -271,7 +293,7 @@ def group_order_numbers_by_customer(
         customer_name = ""
 
         # 注番から顧客名を検索
-        for row in source_data[6:]:
+        for row in source_data[header_row_idx + 1:]:
             if order_col < len(row) and customer_col < len(row):
                 if str(row[order_col]).strip() == order_num:
                     customer_name = str(row[customer_col]).strip()

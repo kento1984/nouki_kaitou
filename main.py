@@ -418,13 +418,14 @@ def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
 
     # ソースファイル読み込み
     source_data_raw = load_source_file(str(source_path))
-    cols = get_column_positions(source_data_raw)
-    if cols is None:
+    result = get_column_positions(source_data_raw)
+    if result is None:
         print("エラー: ヘッダー行の列位置を検出できませんでした。")
         sys.exit(1)
+    cols, header_row_idx = result
 
     orders: list[OrderRow] = []
-    for i in get_data_rows_range(source_data_raw, cols):
+    for i in get_data_rows_range(source_data_raw, cols, header_row_idx):
         if is_data_row(source_data_raw, i, cols):
             orders.append(parse_order_row(source_data_raw, i, cols))
 
@@ -472,6 +473,7 @@ def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
     preloaded = {
         "source_data_raw": source_data_raw,
         "cols": cols,
+        "header_row_idx": header_row_idx,
         "orders": orders,
         "mfg_wb": mfg_wb,
         "cust_wb": cust_wb,
@@ -509,14 +511,15 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         # CLI経由: 自前で読み込む
         source_data_raw = load_source_file(str(source_path))
 
-        cols = get_column_positions(source_data_raw)
-        if cols is None:
+        result = get_column_positions(source_data_raw)
+        if result is None:
             print("エラー: ヘッダー行の列位置を検出できませんでした。")
-            print("10PM.XLSの形式を確認してください。")
+            print("受注リストファイルの形式を確認してください。")
             sys.exit(1)
+        cols, header_row_idx = result
 
         orders = []
-        for i in get_data_rows_range(source_data_raw, cols):
+        for i in get_data_rows_range(source_data_raw, cols, header_row_idx):
             if is_data_row(source_data_raw, i, cols):
                 orders.append(parse_order_row(source_data_raw, i, cols))
 
