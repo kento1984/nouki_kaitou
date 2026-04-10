@@ -456,7 +456,7 @@ def _show_gui(args: argparse.Namespace) -> tuple[dict | None, dict]:
     # キャッシュ構築（master_customers用。confirming_wsはGUIに不要なのでNone）
     cache = build_all_caches(mfg_wb, cust_wb, None, source_data_raw, cols)
     branch = (
-        load_branch_settings(mfg_wb, source_data_raw, cols)
+        load_branch_settings(mfg_wb, source_data_raw, cols, header_row_idx)
         if mfg_wb is not None
         else BranchSettings()
     )
@@ -555,7 +555,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         cust_wb = load_workbook(str(cust_found), data_only=True)
         warnings.resetwarnings()
 
-        branch = load_branch_settings(mfg_wb, source_data_raw, cols) if mfg_wb is not None else BranchSettings()
+        branch = load_branch_settings(mfg_wb, source_data_raw, cols, header_row_idx) if mfg_wb is not None else BranchSettings()
 
     print(f"ツールフォルダ: {tool_folder}")
 

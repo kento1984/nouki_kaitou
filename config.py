@@ -71,6 +71,7 @@ def load_branch_settings(
     manufacturer_master_wb: object,
     source_data: list[list[str]],
     cols: dict[str, int],
+    header_row_idx: int = 4,
 ) -> BranchSettings:
     """営業所設定を読み込む。
 
@@ -81,6 +82,7 @@ def load_branch_settings(
         manufacturer_master_wb: メーカー一覧.xlsxのWorkbook
         source_data: 受注一覧データ（0-indexed行リスト、各行はタブ区切り列リスト）
         cols: 列位置マッピング
+        header_row_idx: ヘッダー行インデックス（デフォルト4=旧フォーマット）
 
     Returns:
         BranchSettings（見つからない場合はデフォルト値）
@@ -93,8 +95,8 @@ def load_branch_settings(
         return settings
 
     branch_code = ""
-    # データ行（VBAでは7行目から、0-indexedでは6から）
-    for row in source_data[6:]:
+    # ヘッダー行の次からデータ行をスキャン
+    for row in source_data[header_row_idx + 1:]:
         if order_col < len(row):
             order_num = str(row[order_col]).strip()
             if order_num and len(order_num) >= 2:
