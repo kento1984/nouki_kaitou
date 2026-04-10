@@ -191,6 +191,33 @@ class TestResolveManufacturerName:
         cache = _make_cache(mfg_name={"0075": "ダイヘン"})
         assert _resolve_manufacturer_name(row, cache) == "ダイヘン"
 
+    def test_0581_with_space(self):
+        """新コード0581(その他)で品名先頭からメーカー名抽出"""
+        row = _make_row(
+            item_group_code="0581",
+            product_name="大岡酸素商会 溶接棒 3.2mm"
+        )
+        cache = _make_cache()
+        assert _resolve_manufacturer_name(row, cache) == "大岡酸素商会"
+
+    def test_0579_full_width_space(self):
+        """新コード0579(その他(修理))で全角スペース品名"""
+        row = _make_row(
+            item_group_code="0579",
+            product_name="ユアサ商事㈱\u3000修理部品A"
+        )
+        cache = _make_cache()
+        assert _resolve_manufacturer_name(row, cache) == "ユアサ商事㈱"
+
+    def test_0581_no_space(self):
+        """新コード0581でスペースなし品名→空文字"""
+        row = _make_row(
+            item_group_code="0581",
+            product_name="特殊溶接棒"
+        )
+        cache = _make_cache()
+        assert _resolve_manufacturer_name(row, cache) == ""
+
 
 # ============================================
 # _resolve_product_name
@@ -215,6 +242,22 @@ class TestResolveProductName:
             product_name="XYZ\u3000特殊品"
         )
         assert _resolve_product_name(row, "XYZ") == "特殊品"
+
+    def test_0581_product_name_split(self):
+        """新コード0581で品名からメーカー名を除去"""
+        row = _make_row(
+            item_group_code="0581",
+            product_name="大岡酸素商会 溶接棒 3.2mm"
+        )
+        assert _resolve_product_name(row, "大岡酸素商会") == "溶接棒 3.2mm"
+
+    def test_0579_product_name_split(self):
+        """新コード0579で品名からメーカー名を除去(全角スペース)"""
+        row = _make_row(
+            item_group_code="0579",
+            product_name="ユアサ商事㈱\u3000修理部品A"
+        )
+        assert _resolve_product_name(row, "ユアサ商事㈱") == "修理部品A"
 
 
 # ============================================

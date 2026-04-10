@@ -59,6 +59,11 @@ from nouki_kaitou.utils import (
     normalize_name_for_comparison,
 )
 
+# 品名先頭からメーカー名を抽出する特殊コード
+# 旧: Z99(その他) / Z97(その他(修理))
+# 新: 0581(その他) / 0579(その他(修理))
+_SPECIAL_MFG_FROM_PRODUCT_NAME = frozenset({"Z99", "Z97", "0581", "0579"})
+
 
 # ============================================
 # VBA: GroupOrderNumbersByCustomer (L932-982)
@@ -554,7 +559,7 @@ def _resolve_manufacturer_name(row: OrderRow, cache: CacheStore) -> str:
     """メーカー名を解決する（Z99/Z97特殊処理含む）。"""
     code = normalize_item_group_code(row.item_group_code)
 
-    if code in ("Z99", "Z97"):
+    if code in _SPECIAL_MFG_FROM_PRODUCT_NAME:
         # 品名の先頭部分からメーカー名を抽出
         full_text = row.product_name.strip()
         # 半角スペース→全角スペースの順で探す
@@ -579,9 +584,9 @@ def _resolve_manufacturer_name(row: OrderRow, cache: CacheStore) -> str:
 def _resolve_product_name(row: OrderRow, manufacturer_name: str) -> str:
     """品名を解決する（Z99/Z97はメーカー名部分を除去）。"""
     product_name = row.product_name.strip()
-    code = row.item_group_code.strip()
+    code = normalize_item_group_code(row.item_group_code)
 
-    if code in ("Z99", "Z97") and manufacturer_name:
+    if code in _SPECIAL_MFG_FROM_PRODUCT_NAME and manufacturer_name:
         # メーカー名の後のスペース以降を品名とする
         space_pos = product_name.find(" ")
         if space_pos < 0:
