@@ -707,11 +707,11 @@ class TestCleanOldHistory:
         wb, ws = _make_history_ws()
         today = datetime.date(2026, 2, 16)
 
-        # 200日前のレコード（180日超 → 削除対象）
+        # 400日前のレコード（365日超 → 削除対象）
         _add_history_row(
             ws, 2,
-            sent_dt=datetime.datetime(2025, 7, 31, 10, 0),
-            order_date=datetime.date(2025, 7, 25),
+            sent_dt=datetime.datetime(2025, 1, 12, 10, 0),
+            order_date=datetime.date(2025, 1, 5),
             customer="顧客A",
             order_num="11111",
             detail="10",
@@ -732,7 +732,7 @@ class TestCleanOldHistory:
             delivery="回答",
         )
 
-        deleted = clean_old_history(ws, days_to_keep=180, today=today)
+        deleted = clean_old_history(ws, days_to_keep=365, today=today)
         assert deleted == 1
         assert ws.cell(row=2, column=4).value == "22222"
         assert ws.cell(row=3, column=4).value is None
@@ -754,7 +754,7 @@ class TestCleanOldHistory:
             delivery="回答",
         )
 
-        deleted = clean_old_history(ws, days_to_keep=180, today=today)
+        deleted = clean_old_history(ws, days_to_keep=365, today=today)
         assert deleted == 0
 
     def test_all_old(self):
@@ -764,8 +764,8 @@ class TestCleanOldHistory:
 
         _add_history_row(
             ws, 2,
-            sent_dt=datetime.datetime(2025, 6, 1, 10, 0),
-            order_date=datetime.date(2025, 5, 25),
+            sent_dt=datetime.datetime(2024, 12, 1, 10, 0),
+            order_date=datetime.date(2024, 11, 25),
             customer="顧客A",
             order_num="11111",
             detail="10",
@@ -774,7 +774,7 @@ class TestCleanOldHistory:
             delivery="回答",
         )
 
-        deleted = clean_old_history(ws, days_to_keep=180, today=today)
+        deleted = clean_old_history(ws, days_to_keep=365, today=today)
         assert deleted == 1
         assert ws.cell(row=2, column=4).value is None
 
@@ -801,19 +801,19 @@ class TestCleanOldHistory:
             delivery="回答",
         )
 
-        deleted = clean_old_history(ws, days_to_keep=180, today=today)
+        deleted = clean_old_history(ws, days_to_keep=365, today=today)
         assert deleted == 0
 
     def test_cutoff_boundary(self):
         """ちょうどcutoff日のレコードは残る"""
         wb, ws = _make_history_ws()
         today = datetime.date(2026, 2, 16)
-        cutoff = today - datetime.timedelta(days=180)
+        cutoff = today - datetime.timedelta(days=365)
 
         _add_history_row(
             ws, 2,
             sent_dt=datetime.datetime(cutoff.year, cutoff.month, cutoff.day, 10, 0),
-            order_date=datetime.date(2025, 7, 25),
+            order_date=datetime.date(2025, 2, 10),
             customer="顧客A",
             order_num="11111",
             detail="10",
@@ -822,7 +822,7 @@ class TestCleanOldHistory:
             delivery="回答",
         )
 
-        deleted = clean_old_history(ws, days_to_keep=180, today=today)
+        deleted = clean_old_history(ws, days_to_keep=365, today=today)
         assert deleted == 0
 
 
@@ -835,11 +835,11 @@ class TestCleanOldConfirmingList:
         wb, ws = _make_confirming_ws()
         today = datetime.date(2026, 2, 16)
 
-        # 200日前のレコード
+        # 400日前のレコード（365日超 → 削除対象）
         _add_confirming_row(
             ws, 2,
-            sent_dt=datetime.datetime(2025, 7, 31, 10, 0),
-            order_date=datetime.date(2025, 7, 25),
+            sent_dt=datetime.datetime(2025, 1, 12, 10, 0),
+            order_date=datetime.date(2025, 1, 5),
             customer="顧客A",
             order_num="11111",
             detail="10",
@@ -862,7 +862,7 @@ class TestCleanOldConfirmingList:
             status="欠品中",
         )
 
-        deleted = clean_old_confirming_list(ws, days_to_keep=180, today=today)
+        deleted = clean_old_confirming_list(ws, days_to_keep=365, today=today)
         assert deleted == 1
         assert ws.cell(row=2, column=4).value == "22222"
 
@@ -1224,11 +1224,11 @@ class TestSaveHistoryBatch:
             exec_time = datetime.datetime(2026, 2, 16, 10, 0)
             today = datetime.date(2026, 2, 16)
 
-            # 200日前のレコード（削除対象）
+            # 400日前のレコード（365日超 → 削除対象）
             old_history = [
                 [
-                    datetime.datetime(2025, 7, 31, 10, 0),
-                    datetime.date(2025, 7, 25),
+                    datetime.datetime(2025, 1, 12, 10, 0),
+                    datetime.date(2025, 1, 5),
                     "顧客A", "11111", 10,
                     "メーカー", "製品", "回答", "test",
                 ],

@@ -37,6 +37,9 @@ _CONFIRMING_TABLE_NAME = "確認中テーブル"
 HISTORY_SHEET_NAME = "送付履歴"
 CONFIRMING_SHEET_NAME = "確認中一覧"
 
+# 送付履歴・確認中一覧の保持日数（この日数を超えた古いレコードを自動削除）
+DEFAULT_DAYS_TO_KEEP = 365
+
 # 送付履歴ヘッダー（9列）
 _HISTORY_HEADERS = [
     "送付日時", "受注日", "顧客名", "受発注伝票", "明細",
@@ -499,14 +502,14 @@ def clean_confirming_list(
 # ============================================
 def clean_old_history(
     ws: Worksheet,
-    days_to_keep: int = 180,
+    days_to_keep: int = DEFAULT_DAYS_TO_KEEP,
     today: Optional[datetime.date] = None,
 ) -> int:
     """送付履歴テーブルから古いレコードを削除する。
 
     Args:
         ws: 送付履歴シート
-        days_to_keep: 保持日数（デフォルト180日）
+        days_to_keep: 保持日数（デフォルト365日）
         today: 基準日（テスト用）
 
     Returns:
@@ -521,14 +524,14 @@ def clean_old_history(
 # ============================================
 def clean_old_confirming_list(
     ws: Worksheet,
-    days_to_keep: int = 180,
+    days_to_keep: int = DEFAULT_DAYS_TO_KEEP,
     today: Optional[datetime.date] = None,
 ) -> int:
     """確認中一覧テーブルから古いレコードを削除する。
 
     Args:
         ws: 確認中一覧シート
-        days_to_keep: 保持日数（デフォルト180日）
+        days_to_keep: 保持日数（デフォルト365日）
         today: 基準日（テスト用）
 
     Returns:
@@ -688,7 +691,7 @@ def save_history_batch(
     new_confirming: list[ConfirmingRecord],
     execution_time: datetime.datetime,
     sender: str = "",
-    days_to_keep: int = 180,
+    days_to_keep: int = DEFAULT_DAYS_TO_KEEP,
     today: datetime.date | None = None,
     deleted_keys: set[str] | None = None,
 ) -> None:
@@ -705,7 +708,7 @@ def save_history_batch(
         new_confirming: 新規確認中伝票
         execution_time: 実行時刻
         sender: 送付者名
-        days_to_keep: 保持日数（デフォルト180日）
+        days_to_keep: 保持日数（デフォルト365日）
         today: 基準日（テスト用）
         deleted_keys: SAPで明細削除された伝票のキーセット（"注番|明細"形式）。
             確認中一覧に存在すれば除去する。送付履歴には移動しない。

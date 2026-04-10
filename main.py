@@ -788,18 +788,18 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
             print(f"明細削除（確認中一覧から除去）: {len(deleted_keys)}件")
 
         has_updates = bool(all_confirmed or all_confirming or deleted_keys)
+        t_save = time.perf_counter()
+        save_history_batch(
+            str(history_path), history_rows, confirming_rows,
+            all_confirmed, all_confirming,
+            execution_time, args.sender,
+            deleted_keys=deleted_keys,
+        )
+        save_elapsed = time.perf_counter() - t_save
         if has_updates:
-            t_save = time.perf_counter()
-            save_history_batch(
-                str(history_path), history_rows, confirming_rows,
-                all_confirmed, all_confirming,
-                execution_time, args.sender,
-                deleted_keys=deleted_keys,
-            )
-            save_elapsed = time.perf_counter() - t_save
             print(f"送付履歴保存: {history_path} ({save_elapsed:.2f}s)")
         else:
-            print("送付履歴: 更新なし")
+            print(f"送付履歴: 更新なし（クリーンアップ実行 {save_elapsed:.2f}s）")
 
         # --- 11. メール生成 ---
         if args.email_mode != "none" and all_results:

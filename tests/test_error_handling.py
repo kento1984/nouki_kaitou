@@ -586,14 +586,14 @@ class TestHistoryErrorHandling:
         """空の送付履歴をクリーンアップ"""
         path = str(tmp_path / "test.xlsx")
         wb = initialize_delivery_history(path)
-        deleted = clean_old_history(wb["送付履歴"], 180, TODAY)
+        deleted = clean_old_history(wb["送付履歴"], 365, TODAY)
         assert deleted == 0
 
     def test_clean_old_confirming_empty(self, tmp_path):
         """空の確認中一覧をクリーンアップ"""
         path = str(tmp_path / "test.xlsx")
         wb = initialize_delivery_history(path)
-        deleted = clean_old_confirming_list(wb["確認中一覧"], 180, TODAY)
+        deleted = clean_old_confirming_list(wb["確認中一覧"], 365, TODAY)
         assert deleted == 0
 
     def test_duplicate_order_in_history(self, tmp_path):
