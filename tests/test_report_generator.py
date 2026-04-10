@@ -179,6 +179,18 @@ class TestResolveManufacturerName:
         cache = _make_cache(mfg_name={})
         assert _resolve_manufacturer_name(row, cache) == "X01"
 
+    def test_numeric_code_cache_hit(self):
+        """4桁数字コードでキャッシュヒットする"""
+        row = _make_row(item_group_code="0075", manufacturer_name="")
+        cache = _make_cache(mfg_name={"0075": "ダイヘン"})
+        assert _resolve_manufacturer_name(row, cache) == "ダイヘン"
+
+    def test_numeric_code_without_leading_zero(self):
+        """先頭ゼロなし数字コードでも正規化によりヒット"""
+        row = _make_row(item_group_code="75", manufacturer_name="")
+        cache = _make_cache(mfg_name={"0075": "ダイヘン"})
+        assert _resolve_manufacturer_name(row, cache) == "ダイヘン"
+
 
 # ============================================
 # _resolve_product_name

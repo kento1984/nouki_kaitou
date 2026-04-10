@@ -143,6 +143,32 @@ class TestBuildManufacturerCache:
         _, mfg_days = build_manufacturer_cache(wb)
         assert mfg_days["D01"] == 2
 
+    def test_numeric_key_normalized_to_zero_padded(self):
+        """数値キー(int)が4桁ゼロ埋め文字列で格納される"""
+        data = [
+            ["品目Group", "メーカー名", "加算日数"],
+            [75, "ダイヘン", 3],       # openpyxlがintとして返すケース
+            ["0319", "マイト工業", 2],  # 文字列で先頭ゼロあり
+            ["A01", "アネスト岩田", 2],  # 旧コード（英字）
+        ]
+        ws = MockWorksheet(data)
+        wb = MockWorkbook({"メーカー一覧": ws})
+
+        mfg_name, mfg_days = build_manufacturer_cache(wb)
+
+        # int 75 → "0075" で格納
+        assert "0075" in mfg_name
+        assert mfg_name["0075"] == "ダイヘン"
+        assert mfg_days["0075"] == 3
+        # "75" では引けない
+        assert "75" not in mfg_name
+
+        # 文字列 "0319" はそのまま
+        assert mfg_name["0319"] == "マイト工業"
+
+        # 旧コード "A01" はそのまま
+        assert mfg_name["A01"] == "アネスト岩田"
+
 
 # ============================================
 # build_customer_cache

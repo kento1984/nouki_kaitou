@@ -16,6 +16,7 @@ from nouki_kaitou.utils import (
     is_december_31,
     is_file_open,
     is_numeric_char,
+    normalize_item_group_code,
     normalize_name_for_comparison,
     parse_date,
     parse_time,
@@ -453,3 +454,48 @@ class TestIsFileOpen:
             assert is_file_open(path) is True
         finally:
             Path(path).unlink(missing_ok=True)
+
+
+# ============================================
+# normalize_item_group_code
+# ============================================
+class TestNormalizeItemGroupCode:
+    def test_digit_string_without_leading_zero(self):
+        """数字のみ文字列（先頭ゼロなし）→ 4桁ゼロ埋め"""
+        assert normalize_item_group_code("75") == "0075"
+
+    def test_digit_string_with_leading_zero(self):
+        """数字のみ文字列（先頭ゼロあり）→ そのまま"""
+        assert normalize_item_group_code("0075") == "0075"
+
+    def test_int_type(self):
+        """int型 → 4桁ゼロ埋め"""
+        assert normalize_item_group_code(75) == "0075"
+
+    def test_alpha_code(self):
+        """英字含み → そのまま"""
+        assert normalize_item_group_code("A01") == "A01"
+
+    def test_alpha_mixed(self):
+        """英字数字混在 → そのまま"""
+        assert normalize_item_group_code("SA5") == "SA5"
+
+    def test_empty_string(self):
+        """空文字 → 空文字"""
+        assert normalize_item_group_code("") == ""
+
+    def test_none(self):
+        """None → 空文字"""
+        assert normalize_item_group_code(None) == ""
+
+    def test_whitespace(self):
+        """前後空白 → strip後に正規化"""
+        assert normalize_item_group_code(" 0075 ") == "0075"
+
+    def test_single_digit(self):
+        """1桁数字 → 4桁ゼロ埋め"""
+        assert normalize_item_group_code("5") == "0005"
+
+    def test_five_digit(self):
+        """4桁超数字 → zfill(4)なのでそのまま"""
+        assert normalize_item_group_code("12345") == "12345"

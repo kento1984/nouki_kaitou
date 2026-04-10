@@ -55,6 +55,7 @@ from nouki_kaitou.tracking import clean_external_comment, extract_tracking_info
 from nouki_kaitou.utils import (
     build_report_filename,
     build_sheet_name,
+    normalize_item_group_code,
     normalize_name_for_comparison,
 )
 
@@ -551,7 +552,7 @@ def create_delivery_report(
 
 def _resolve_manufacturer_name(row: OrderRow, cache: CacheStore) -> str:
     """メーカー名を解決する（Z99/Z97特殊処理含む）。"""
-    code = row.item_group_code.strip()
+    code = normalize_item_group_code(row.item_group_code)
 
     if code in ("Z99", "Z97"):
         # 品名の先頭部分からメーカー名を抽出

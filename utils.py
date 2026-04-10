@@ -411,3 +411,25 @@ def format_quantity(qty: str) -> str:
     except (InvalidOperation, ValueError):
         # 数値でなければそのまま返す
         return s
+
+
+def normalize_item_group_code(value: object) -> str:
+    """品目GroupCodeを正規化する。
+
+    openpyxlがExcelの数値セルをintで返す場合（75→"75"）と、
+    SAPテキストが先頭ゼロ付き文字列で来る場合（"0075"）の
+    不一致を解消するための正規化。
+
+    ルール:
+    - int型 or 数字のみ文字列 → 4桁ゼロ埋め ("75"→"0075", 75→"0075")
+    - 英字を含む → そのまま strip のみ ("A01"→"A01")
+    - None / 空文字 → 空文字
+    """
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    if s.isdigit():
+        return s.zfill(4)
+    return s

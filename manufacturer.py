@@ -8,6 +8,7 @@ VBAの以下の関数を移植:
 from __future__ import annotations
 
 from nouki_kaitou.models import CacheStore
+from nouki_kaitou.utils import normalize_item_group_code
 
 
 # ============================================
@@ -21,13 +22,13 @@ def get_manufacturer_name(
     """品目GroupCodeからメーカー名を取得する。
 
     Args:
-        item_group_code: 品目GroupCode（例: "D01"）
+        item_group_code: 品目GroupCode（例: "D01", "0075"）
         cache: キャッシュストア
 
     Returns:
         メーカー名（見つからなければ空文字）
     """
-    code = item_group_code.strip()
+    code = normalize_item_group_code(item_group_code)
     if not code:
         return ""
 
@@ -51,7 +52,7 @@ def get_delivery_days_to_add(
     Returns:
         加算日数（デフォルト2）
     """
-    code = item_group_code.strip()
+    code = normalize_item_group_code(item_group_code)
     if not code:
         return 2
 

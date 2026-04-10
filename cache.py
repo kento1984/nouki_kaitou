@@ -13,7 +13,7 @@ import datetime
 from typing import TYPE_CHECKING, Optional
 
 from nouki_kaitou.models import CacheStore, ColumnMap, DeliveryPattern
-from nouki_kaitou.utils import parse_date
+from nouki_kaitou.utils import normalize_item_group_code, parse_date
 
 if TYPE_CHECKING:
     import openpyxl.worksheet.worksheet as ws_type
@@ -69,7 +69,7 @@ def build_manufacturer_cache(
         return mfg_name, mfg_days
 
     for row in ws.iter_rows(min_row=2, max_col=3, values_only=True):
-        key = str(row[0]).strip() if row[0] else ""
+        key = normalize_item_group_code(row[0])
         if not key or key in mfg_name:
             continue
 

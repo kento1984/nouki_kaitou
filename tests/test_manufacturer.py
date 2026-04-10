@@ -29,6 +29,16 @@ class TestGetManufacturerName:
         assert get_manufacturer_name("  D01  ", cache) == "ダイヘン"
 
 
+    def test_numeric_code_normalized(self):
+        """数字コードが正規化されてルックアップされる"""
+        cache = CacheStore()
+        cache.mfg_name = {"0075": "ダイヘン"}
+        # SAP由来 "0075" → 正規化 "0075" → ヒット
+        assert get_manufacturer_name("0075", cache) == "ダイヘン"
+        # 先頭ゼロなし "75" → 正規化 "0075" → ヒット
+        assert get_manufacturer_name("75", cache) == "ダイヘン"
+
+
 class TestGetDeliveryDaysToAdd:
     def test_found(self):
         cache = CacheStore()
@@ -43,3 +53,10 @@ class TestGetDeliveryDaysToAdd:
     def test_empty_code(self):
         cache = CacheStore()
         assert get_delivery_days_to_add("", cache) == 2
+
+    def test_numeric_code_normalized(self):
+        """数字コードが正規化されてルックアップされる"""
+        cache = CacheStore()
+        cache.mfg_days = {"0075": 3}
+        assert get_delivery_days_to_add("0075", cache) == 3
+        assert get_delivery_days_to_add("75", cache) == 3
