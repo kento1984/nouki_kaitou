@@ -670,17 +670,19 @@ def _write_info_section(
 ) -> int:
     """ご連絡事項と署名セクションを書き込む。返り値は次の空き行。"""
     from nouki_kaitou.tracking import can_direct_track, get_tracking_url
-    from nouki_kaitou.utils import to_circled_number
+    from nouki_kaitou.utils import get_special_notice_excel, to_circled_number
 
     has_tracking = bool(tracking_info_list)
     has_stockout = bool(stockout_info_list)
     has_bunno = bool(bunno_info_list)
+    special_notice = get_special_notice_excel(today)
+    has_special_notice = special_notice is not None
 
     row = start_row
 
     # --- ご連絡事項ヘッダー ---
     ws.merge_cells(f"A{row}:G{row}")
-    if has_tracking or has_stockout or has_bunno:
+    if has_tracking or has_stockout or has_bunno or has_special_notice:
         cell = ws.cell(row=row, column=1)
         cell.value = "【ご連絡事項】"
         cell.font = _make_font(size=14, bold=True, color=_HEADER_BG)
@@ -710,6 +712,18 @@ def _write_info_section(
     cell_branch.value = branch_name
     cell_branch.font = _make_font(size=14, bold=True, color=_HEADER_BG)
     cell_branch.alignment = Alignment(horizontal="center", vertical="top")
+
+    # --- 特別注意文（4月SAP切替対応・2026-04-24まで） ---
+    if has_special_notice:
+        row += 1
+        ws.merge_cells(f"A{row}:L{row}")
+        cell_notice = ws.cell(row=row, column=1)
+        cell_notice.value = special_notice
+        cell_notice.font = _make_font(size=11, bold=True, color="B40000")
+        cell_notice.alignment = Alignment(
+            horizontal="left", vertical="center", wrap_text=True
+        )
+        ws.row_dimensions[row].height = 55
 
     # --- 送り状情報 ---
     if has_tracking:

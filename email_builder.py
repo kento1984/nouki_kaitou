@@ -124,6 +124,12 @@ def build_email_body_html(
     # 挨拶文
     parts.append(_build_greeting(customer_name, branch))
 
+    # 特別注意文（4月SAP切替対応・2026-04-24まで）
+    from nouki_kaitou.utils import get_special_notice_email
+    special_notice = get_special_notice_email(today)
+    if special_notice:
+        parts.append(_build_special_notice(special_notice))
+
     # 送り状情報セクション
     if has_tracking:
         parts.append(_build_tracking_section(tracking_info_list))
@@ -290,6 +296,18 @@ def _build_greeting(customer_name: str, branch: BranchSettings) -> str:
         f"マツモト産業㈱{h(branch.name)}です。<br><br>"
         f"ご注文ありがとうございます。<br>"
         f"納期回答書をお送りいたします。<br><br>"
+    )
+
+
+def _build_special_notice(notice_text: str) -> str:
+    """特別注意文セクション（4月SAP切替対応・期間終了後この関数と呼出を削除）"""
+    h = html_escape
+    return (
+        "<div style='margin: 10px 0 20px 0; padding: 12px; "
+        "background-color: #fff8f0; border-left: 4px solid #cc6600; "
+        "color: #993300;'>"
+        f"{h(notice_text)}"
+        "</div>"
     )
 
 

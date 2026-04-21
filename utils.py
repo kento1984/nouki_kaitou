@@ -433,3 +433,40 @@ def normalize_item_group_code(value: object) -> str:
     if s.isdigit():
         return s.zfill(4)
     return s
+
+
+# ============================================
+# 4月SAP切替対応の特別注意文（2026-04-24まで。以降この関数と呼出箇所を削除）
+# ============================================
+_SPECIAL_NOTICE_EXCEL = (
+    "※4月のシステム切替の影響により、納期回答が遅れましたことを"
+    "お詫び申し上げます。既にお届け済みの商品につきましても"
+    "納期回答が届く場合がございます。何卒ご了承ください。"
+)
+
+_SPECIAL_NOTICE_EMAIL = (
+    "なお、4月のシステム切替の影響により納期回答が"
+    "遅れましたことをお詫び申し上げます。"
+    "既にお届け済みの商品につきましても納期回答が届く場合が"
+    "ございます。何卒ご了承ください。"
+)
+
+_SPECIAL_NOTICE_END_DATE = datetime.date(2026, 4, 24)
+
+
+def get_special_notice_excel(today: datetime.date | None = None) -> str | None:
+    """Excel「ご連絡事項」欄用の特別注意文。期間外ならNone。"""
+    if today is None:
+        today = datetime.date.today()
+    if today <= _SPECIAL_NOTICE_END_DATE:
+        return _SPECIAL_NOTICE_EXCEL
+    return None
+
+
+def get_special_notice_email(today: datetime.date | None = None) -> str | None:
+    """メール本文用の特別注意文。期間外ならNone。"""
+    if today is None:
+        today = datetime.date.today()
+    if today <= _SPECIAL_NOTICE_END_DATE:
+        return _SPECIAL_NOTICE_EMAIL
+    return None
