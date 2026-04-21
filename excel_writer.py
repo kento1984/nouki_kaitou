@@ -724,6 +724,7 @@ def _write_info_section(
             horizontal="left", vertical="center", wrap_text=True
         )
         ws.row_dimensions[row].height = 55
+        row += 1
 
     # --- 送り状情報 ---
     if has_tracking:
