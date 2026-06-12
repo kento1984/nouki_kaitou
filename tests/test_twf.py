@@ -1033,7 +1033,7 @@ class TestUtilsTwf:
         name = build_report_filename(
             "テスト商事", EXEC_TIME, filename_tag=TWF_FILENAME_TAG,
         )
-        assert name == "納期回答書【展示会】_テスト商事様_20260216.xlsx"
+        assert name == "納期回答書【TWF2026】_テスト商事様_20260216.xlsx"
 
     def test_filename_with_tag_and_rep(self):
         from nouki_kaitou.utils import build_report_filename
@@ -1042,7 +1042,7 @@ class TestUtilsTwf:
             "テスト商事", EXEC_TIME, rep_name="田中",
             filename_tag=TWF_FILENAME_TAG,
         )
-        assert name == "納期回答書【展示会】_テスト商事様_田中様_20260216.xlsx"
+        assert name == "納期回答書【TWF2026】_テスト商事様_田中様_20260216.xlsx"
 
     def test_filename_without_tag_unchanged(self):
         from nouki_kaitou.utils import build_report_filename
@@ -1053,7 +1053,7 @@ class TestUtilsTwf:
     def test_sheet_name_with_prefix(self):
         from nouki_kaitou.utils import build_sheet_name
 
-        assert build_sheet_name("テスト商事", prefix=TWF_SHEET_PREFIX) == "展示会_テスト商事様"
+        assert build_sheet_name("テスト商事", prefix=TWF_SHEET_PREFIX) == "TWF2026_テスト商事様"
 
     def test_sheet_name_prefix_31_chars_limit(self):
         from nouki_kaitou.utils import build_sheet_name

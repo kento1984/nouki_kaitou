@@ -194,7 +194,7 @@ def build_report_filename(
     通常: 納期回答書_顧客名様_yyyymmdd.xlsx
     担当者分割: 納期回答書_顧客名様_担当者名様_yyyymmdd.xlsx
     注番指定: 納期回答書_顧客名様_注番_yyyymmdd.xlsx（複数なら「複数注番」）
-    タグ指定: 納期回答書<タグ>_顧客名様_yyyymmdd.xlsx（例: 【展示会】）
+    タグ指定: 納期回答書<タグ>_顧客名様_yyyymmdd.xlsx（例: 【TWF2026】）
     """
     date_str = execution_time.strftime("%Y%m%d")
 
@@ -223,7 +223,7 @@ def build_sheet_name(
 
     通常: 顧客名様
     担当者分割: 顧客名_担当者名様
-    プレフィックス指定: <プレフィックス>顧客名様（例: 展示会_）
+    プレフィックス指定: <プレフィックス>顧客名様（例: TWF2026_）
     """
     if rep_name:
         name = f"{prefix}{customer_name}_{rep_name}様"
