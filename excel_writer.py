@@ -376,6 +376,7 @@ def format_report(
     cache: Optional[CacheStore] = None,
     today: Optional[datetime.date] = None,
     twf_notice: Optional[str] = None,
+    with_auto_filter: bool = False,
 ) -> None:
     """回答書の書式設定を行う。
 
@@ -393,12 +394,18 @@ def format_report(
         cache: キャッシュストア
         today: 基準日（テスト用）
         twf_notice: TWF展示会注記（指定時のみご連絡事項に赤字表示）
+        with_auto_filter: Trueならヘッダー行（行6）〜データ最終行に
+            オートフィルタを設定する（TWF専用回答書用）
     """
     if today is None:
         today = datetime.date.today()
 
     # データ行の全書式を1パスで適用（5ループ→1ループに統合して高速化）
     _apply_all_data_formatting(ws, last_data_row, today, branch)
+
+    # オートフィルタ（ヘッダー行6〜データ最終行。マージセルは行1-5なので干渉しない）
+    if with_auto_filter:
+        ws.auto_filter.ref = f"A6:L{last_data_row}"
 
     # 税抜き注記
     note_row = last_data_row + 1

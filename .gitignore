@@ -47,3 +47,4 @@ __pycache__/
 # OS
 Thumbs.db
 Desktop.ini
+/sandbox/

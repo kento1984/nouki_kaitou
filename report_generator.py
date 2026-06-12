@@ -57,6 +57,8 @@ from nouki_kaitou.twf import (
     TWF_NOTICE_EXCEL,
     TWF_REPORT_TITLE,
     TWF_SHEET_PREFIX,
+    build_twf_remark_map,
+    format_twf_remark,
     remove_twf_text,
 )
 from nouki_kaitou.utils import (
@@ -423,6 +425,11 @@ def create_delivery_report(
     if rep_name == "__OTHER__" and rep_master_ws is not None:
         registered_rep_list = get_rep_list(customer_name, rep_master_ws)
 
+    # TWFモード: 注番→整形済みTWF情報（入れ忘れ明細への引き継ぎ用）
+    twf_remark_map: dict[str, str] = (
+        build_twf_remark_map(source_data) if twf_mode else {}
+    )
+
     # 情報収集用
     confirmed_orders: list[HistoryRecord] = []
     confirming_orders: list[ConfirmingRecord] = []
@@ -518,6 +525,21 @@ def create_delivery_report(
             delivery_status = "納品済み"
             report_row.delivery_answer = "納品済み"
 
+        # TWFモード: K列備考にTWF情報を整形表示（「No.003243 新成（株）様」形式）。
+        # TWF記載のない明細（入れ忘れ救済分）は同注番の他明細から引き継ぐ。
+        # 既存の備考内容（build_report_rowでTWF記載除去済み）が残る場合は
+        # 「TWF情報 ／ 既存備考」で共存させる
+        if twf_mode:
+            twf_info = (
+                format_twf_remark(row.comment_detail)
+                or twf_remark_map.get(order_num, "")
+            )
+            if twf_info:
+                if report_row.remarks:
+                    report_row.remarks = f"{twf_info} ／ {report_row.remarks}"
+                else:
+                    report_row.remarks = twf_info
+
         ext_comment = None
         if is_external_mode:
             raw = row.comment_external.strip()
@@ -572,6 +594,7 @@ def create_delivery_report(
         bunno_info_list, bunno_completed_list,
         holidays, cache, today,
         twf_notice=TWF_NOTICE_EXCEL if twf_mode else None,
+        with_auto_filter=twf_mode,
     )
 
     # 保存

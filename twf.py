@@ -86,12 +86,17 @@ def collect_twf_orders(
 
 
 # ============================================
-# 備考からのTWF記載除去
+# 備考からのTWF記載除去・整形
 # ============================================
 # TWF + (空白) + No/№ から行末までを除去する
 # （TWF記載には得意先名が続くため行末まで落とす）
 _TWF_REMOVE_RE = re.compile(
     r"[TＴtｔ][WＷwｗ][FＦfｆ][ \t　]*(?:[NＮnｎ][OＯoｏ]|№)[^\n]*"
+)
+
+# 整形用: No/№ の後の任意ピリオドまで読み、残り（番号+後続テキスト）を捕捉
+_TWF_EXTRACT_RE = re.compile(
+    r"[TＴtｔ][WＷwｗ][FＦfｆ][ \t　]*(?:[NＮnｎ][OＯoｏ]|№)[.．]?[ \t　]*([^\n]*)"
 )
 
 
@@ -100,6 +105,42 @@ def remove_twf_text(text: str) -> str:
     if not text:
         return text
     return _TWF_REMOVE_RE.sub("", text)
+
+
+def format_twf_remark(comment: str) -> str:
+    """コメント（明細）のTWF記載を備考表示用に整形する（TWF専用回答書のK列用）。
+
+    「TWFNo.003243　新成（株）様」→「No.003243 新成（株）様」
+    先頭のTWFを落として「No.」に統一し、連続空白は1つに圧縮する。
+    後続テキスト（得意先名・ステータスメモ等）は分類せずそのまま表示。
+    TWF記載がなければ空文字を返す。
+    """
+    if not comment:
+        return ""
+    m = _TWF_EXTRACT_RE.search(comment)
+    if m is None:
+        return ""
+    rest = re.sub(r"[ \t　]+", " ", m.group(1)).strip()
+    return f"No.{rest}" if rest else "No."
+
+
+def build_twf_remark_map(orders: list[OrderRow]) -> dict[str, str]:
+    """注番→整形済みTWF情報のマップを構築する。
+
+    注番内でTWF記載のない明細（入れ忘れ救済分）に、同注番の他明細の
+    TWF情報を引き継いで表示するために使う。同一注番に複数のTWF記載が
+    ある場合は最初に出現した明細の記載を採用する。
+    """
+    remark_map: dict[str, str] = {}
+    for row in orders:
+        order_num = row.order_number.strip()
+        if order_num in remark_map:
+            continue
+        if is_twf_comment(row.comment_detail):
+            formatted = format_twf_remark(row.comment_detail)
+            if formatted:
+                remark_map[order_num] = formatted
+    return remark_map
 
 
 # ============================================

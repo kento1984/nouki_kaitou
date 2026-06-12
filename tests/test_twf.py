@@ -24,7 +24,9 @@ from nouki_kaitou.twf import (
     TWF_NOTICE_EXCEL,
     TWF_REPORT_TITLE,
     TWF_SHEET_PREFIX,
+    build_twf_remark_map,
     collect_twf_orders,
+    format_twf_remark,
     is_twf_active,
     is_twf_comment,
     merge_email_input,
@@ -211,6 +213,67 @@ class TestRemoveTwfText:
         result = remove_twf_text("分納:50個 2/20\nTWFNo.003243　新成（株）")
         assert "分納:50個 2/20" in result
         assert "TWF" not in result
+
+
+# ============================================
+# format_twf_remark（K列備考用の整形）
+# ============================================
+class TestFormatTwfRemark:
+    def test_basic(self):
+        assert format_twf_remark("TWFNo.003243　新成（株）様") == "No.003243 新成（株）様"
+
+    def test_number_only(self):
+        assert format_twf_remark("TWFNo.005210") == "No.005210"
+
+    def test_fumei(self):
+        assert format_twf_remark("TWFNo.不明　新成㈱第三工場様") == "No.不明 新成㈱第三工場様"
+
+    def test_fullwidth(self):
+        assert format_twf_remark("ＴＷＦＮｏ．００３２４３　新成（株）様") == "No.００３２４３ 新成（株）様"
+
+    def test_numero_sign(self):
+        assert format_twf_remark("TWF№003243 新成様") == "No.003243 新成様"
+
+    def test_no_period_no_space(self):
+        assert format_twf_remark("TWFNo.004662先進機設（株）様") == "No.004662先進機設（株）様"
+
+    def test_collapse_spaces(self):
+        assert format_twf_remark("TWF No.  003243　　新成様") == "No.003243 新成様"
+
+    def test_status_memo(self):
+        assert format_twf_remark("TWFNo.004982　(有)狩野溶接工業様お持ち帰り") == "No.004982 (有)狩野溶接工業様お持ち帰り"
+
+    def test_no_twf(self):
+        assert format_twf_remark("欠品中 3月上旬入荷予定") == ""
+
+    def test_twf_tokka_not_formatted(self):
+        assert format_twf_remark("ＴＷＦ特価") == ""
+
+    def test_empty(self):
+        assert format_twf_remark("") == ""
+
+    def test_bare_no(self):
+        assert format_twf_remark("TWFNo.") == "No."
+
+
+# ============================================
+# build_twf_remark_map（注番→TWF情報の引き継ぎマップ）
+# ============================================
+class TestBuildTwfRemarkMap:
+    def test_first_occurrence_wins(self):
+        orders = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.001　新成様"),
+            _make_row(order_number="100", detail_number="20",
+                      comment_detail="TWFNo.001　別テキスト"),
+            _make_row(order_number="200", detail_number="10",
+                      comment_detail=""),
+        ]
+        m = build_twf_remark_map(orders)
+        assert m == {"100": "No.001 新成様"}
+
+    def test_empty(self):
+        assert build_twf_remark_map([]) == {}
 
 
 # ============================================
@@ -432,23 +495,85 @@ class TestCreateDeliveryReportTwf:
         ]
         assert TWF_NOTICE_EXCEL in values
 
-    def test_twf_mode_remark_cleaned(self, tmp_path):
-        """TWF記載はK列備考から除去される"""
+    def _twf_report(self, data, tmp_path, sent=None):
+        """TWF専用回答書を生成して(result, ws)を返すヘルパー。"""
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", sent or {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+            include_only_orders={r.order_number.strip() for r in data},
+            filter_already_sent=False,
+            twf_mode=True,
+        )
+        wb = load_workbook(result.file_path)
+        return result, wb.active
+
+    def test_twf_mode_remark_formatted(self, tmp_path):
+        """TWF記載はK列備考に「No.～」形式で整形表示される"""
         data = [_make_row(order_number="100",
-                          comment_detail="TWFNo.003243　新成（株）")]
+                          comment_detail="TWFNo.003243　新成（株）様")]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=11).value == "No.003243 新成（株）様"
+
+    def test_twf_mode_remark_inherited(self, tmp_path):
+        """TWF記載のない明細（入れ忘れ）は同注番の他明細から引き継ぐ"""
+        data = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.003243　新成（株）様"),
+            _make_row(order_number="100", detail_number="20",
+                      comment_detail=""),  # 入れ忘れ
+        ]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=11).value == "No.003243 新成（株）様"
+        assert ws.cell(row=8, column=11).value == "No.003243 新成（株）様"
+
+    def test_twf_mode_remark_coexists_with_other_text(self, tmp_path):
+        """既存の備考内容がある場合は「TWF情報 ／ 既存備考」で共存"""
+        data = [_make_row(
+            order_number="100",
+            comment_detail="至急対応\nTWFNo.003243　新成（株）様",
+        )]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=11).value == "No.003243 新成（株）様 ／ 至急対応"
+
+    def test_normal_mode_remark_still_removed(self, tmp_path):
+        """通常モードでは従来どおりTWF記載は備考から除去される"""
+        data = [_make_row(order_number="100",
+                          comment_detail="至急対応\nTWFNo.003243　新成（株）様")]
         cache = _make_cache()
         result = create_delivery_report(
             data, "テスト商事", {},
             cache, tmp_path, {}, BRANCH, EXEC_TIME,
             today=TODAY,
-            include_only_orders={"100"},
-            filter_already_sent=False,
-            twf_mode=True,
         )
         wb = load_workbook(result.file_path)
         ws = wb.active
-        remark = ws.cell(row=7, column=11).value
-        assert not remark  # 空またはNone
+        assert ws.cell(row=7, column=11).value == "至急対応"
+
+    def test_twf_mode_auto_filter_set(self, tmp_path):
+        """TWF専用回答書にはオートフィルタが設定される"""
+        data = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.001"),
+            _make_row(order_number="100", detail_number="20",
+                      comment_detail="TWFNo.001"),
+        ]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.auto_filter.ref == "A6:L8"
+
+    def test_normal_mode_no_auto_filter(self, tmp_path):
+        """通常回答書にはオートフィルタを設定しない（従来どおり）"""
+        data = [_make_row()]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        assert ws.auto_filter.ref is None
 
     def test_twf_mode_delivered_override(self, tmp_path):
         """twf_mode: 処理完了+回答済み（履歴に確定記録）→「納品済み」表示"""
