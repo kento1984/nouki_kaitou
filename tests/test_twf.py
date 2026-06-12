@@ -645,8 +645,8 @@ class TestCreateDeliveryReportTwf:
         assert [ws.cell(row=r, column=3).value for r in (7, 8, 9)] == [
             "Ｂ社様", "Ａ社様", "Ｃ社様"]
 
-    def test_twf_delivery_place_chokusou_suffix(self, tmp_path):
-        """直送（転送中（直送用））→ 納入先名に（メーカー直送）付記"""
+    def test_twf_delivery_place_chokusou_unchanged(self, tmp_path):
+        """直送でも納入先名は従来表示のまま（付記なし）"""
         data = [_make_row(
             order_number="100",
             document_type="【受注】直送販売",
@@ -654,10 +654,10 @@ class TestCreateDeliveryReportTwf:
             comment_detail="TWFNo.001　新成様",
         )]
         result, ws = self._twf_report(data, tmp_path)
-        assert ws.cell(row=7, column=10).value == "貴社（メーカー直送）"
+        assert ws.cell(row=7, column=10).value == "貴社"
 
     def test_twf_delivery_place_onetime_replaced(self, tmp_path):
-        """「ワンタイム出荷先」→「ご指定先」置換（直送なら付記も）"""
+        """「ワンタイム出荷先」→「ご指定先」置換"""
         data = [_make_row(
             order_number="100",
             document_type="【受注】直送販売",
@@ -666,13 +666,19 @@ class TestCreateDeliveryReportTwf:
             comment_detail="TWFNo.001　新成様",
         )]
         result, ws = self._twf_report(data, tmp_path)
-        assert ws.cell(row=7, column=10).value == "ご指定先（メーカー直送）"
+        assert ws.cell(row=7, column=10).value == "ご指定先"
 
     def test_twf_delivery_place_stock_unchanged(self, tmp_path):
-        """在庫販売・紐付き（弊社出荷）は無印のまま"""
+        """在庫販売・紐付き（弊社出荷）も従来表示のまま"""
         data = [_make_row(order_number="100", comment_detail="TWFNo.001　新成様")]
         result, ws = self._twf_report(data, tmp_path)
         assert ws.cell(row=7, column=10).value == "貴社"
+
+    def test_twf_title_and_notice_have_2026(self, tmp_path):
+        """タイトル・赤字注記とも「東京ウェルディングフェスタ2026」表記"""
+        assert "東京ウェルディングフェスタ2026" in TWF_REPORT_TITLE
+        assert "東京ウェルディングフェスタ2026" in TWF_NOTICE_EXCEL
+        assert "東京ウェルディングフェスタ2026" in TWF_NOTICE_EMAIL
 
     def test_normal_mode_layout_unchanged(self, tmp_path):
         """通常版はヘッダー・A列・C列・納入先とも従来どおり"""
@@ -851,7 +857,10 @@ class TestEmailBuilderTwf:
             "テスト商事", BRANCH, today=TODAY,
             twf_notice=TWF_NOTICE_EMAIL,
         )
-        assert "東京ウェルディングフェスタ" in body
+        assert "東京ウェルディングフェスタ2026" in body
+        assert "多大なるご尽力を賜り" in body       # 感謝文
+        assert "ご成約いただきました商品" in body
+        assert "<br>" in body                       # 改行が変換されている
 
     def test_body_without_twf_notice(self):
         from nouki_kaitou.email_builder import build_email_body_html

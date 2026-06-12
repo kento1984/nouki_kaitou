@@ -553,17 +553,9 @@ def create_delivery_report(
                     if report_row.remarks else twf_info.memo
                 )
 
-            # 納入先名の補強: ワンタイム出荷先→ご指定先、直送→（メーカー直送）付記
-            place = report_row.delivery_place
-            if place.startswith("ワンタイム出荷先"):
-                place = "ご指定先"
-            is_chokusou = (
-                row.document_type.strip() == "【受注】直送販売"
-                and not is_himozuki
-            )
-            if is_chokusou and place != "お引き取り":
-                place = f"{place}（メーカー直送）"
-            report_row.delivery_place = place
+            # 納入先名: 「ワンタイム出荷先」（SAP内部表現）→「ご指定先」に置換
+            if report_row.delivery_place.startswith("ワンタイム出荷先"):
+                report_row.delivery_place = "ご指定先"
 
             # TWF No.昇順ソートのため書き込みは後段でまとめて行う
             twf_pending.append((

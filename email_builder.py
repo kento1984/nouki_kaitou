@@ -306,13 +306,17 @@ def _build_greeting(customer_name: str, branch: BranchSettings) -> str:
 
 
 def _build_twf_notice(notice_text: str) -> str:
-    """TWF展示会注記セクション（期間限定。twf.py参照。期間終了後この関数と呼出を削除）"""
+    """TWF展示会注記セクション（期間限定。twf.py参照。期間終了後この関数と呼出を削除）
+
+    notice_text中の改行（\\n）は<br>に変換して段落を分ける。
+    """
     h = html_escape
+    body = h(notice_text).replace("\n", "<br>")
     return (
         "<div style='margin: 10px 0 20px 0; padding: 12px; "
         "background-color: #fff8f0; border-left: 4px solid #cc6600; "
         "color: #993300;'>"
-        f"{h(notice_text)}"
+        f"{body}"
         "</div>"
     )
 
