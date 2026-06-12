@@ -532,14 +532,14 @@ def _write_twf_total_row(ws: Worksheet, last_data_row: int) -> None:
     double_top = Side(style="double", color=_ACCENT_BG)
     band_fill = _make_fill("F5EEDC")  # アクセント色（ゴールド）の淡色
 
-    for col in range(6, 13):  # F〜L
+    for col in range(5, 13):  # E〜L
         cell = ws.cell(row=total_row, column=col)
         cell.border = Border(top=double_top)
         cell.fill = band_fill
 
-    # ラベル（F:G結合・右寄せ・紺太字）
-    ws.merge_cells(f"F{total_row}:G{total_row}")
-    cell_label = ws.cell(row=total_row, column=6)
+    # ラベル（E:G結合・右寄せ・紺太字。F:Gだと幅不足で見切れるためE列まで含める）
+    ws.merge_cells(f"E{total_row}:G{total_row}")
+    cell_label = ws.cell(row=total_row, column=5)
     cell_label.value = "展示会ご成約合計（税抜）："
     cell_label.font = _make_font(size=11, bold=True, color=_TITLE_BG)
     cell_label.alignment = Alignment(horizontal="right", vertical="center")

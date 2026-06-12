@@ -737,7 +737,8 @@ class TestCreateDeliveryReportTwf:
         ]
         result, ws = self._twf_report(data, tmp_path)
         total_row = 10  # データ7〜9行 → 合計は10行目
-        assert ws.cell(row=total_row, column=6).value == "展示会ご成約合計（税抜）："
+        assert ws.cell(row=total_row, column=5).value == "展示会ご成約合計（税抜）："
+        assert f"E{total_row}:G{total_row}" in [str(r) for r in ws.merged_cells.ranges]
         assert ws.cell(row=total_row, column=8).value == 80000
         assert ws.cell(row=total_row, column=8).number_format == '"￥"#,##0'
         assert ws.cell(row=total_row, column=9).value == "※金額確定分の合計です"
@@ -778,7 +779,7 @@ class TestCreateDeliveryReportTwf:
         wb = load_workbook(result.file_path)
         ws = wb.active
         assert ws.cell(row=8, column=7).value == "※表示金額は税抜きです"
-        assert ws.cell(row=8, column=6).value is None  # 合計ラベルなし
+        assert ws.cell(row=8, column=5).value is None  # 合計ラベルなし
 
     def test_normal_mode_no_thanks(self, tmp_path):
         """通常版には感謝文は出ない"""
