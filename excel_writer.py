@@ -105,6 +105,17 @@ _HEADER_LABELS = [
     "数量", "単価", "金額", "納期回答", "納入先名", "備考", "弊社注番",
 ]
 
+# TWF専用回答書のレイアウト（期間限定。twf.py参照）
+# A=TWF No., C=お客様名 に差し替え。D〜L列は通常版と完全一致のため
+# 書式エンジン（色分け・数値書式・罫線）はそのまま流用できる
+_TWF_HEADER_LABELS = [
+    "TWF No.", "担当者様", "お客様名", "メーカー名", "品名",
+    "数量", "単価", "金額", "納期回答", "納入先名", "備考", "弊社注番",
+]
+_TWF_COLUMN_WIDTHS = list(_COLUMN_WIDTHS)
+_TWF_COLUMN_WIDTHS[0] = 10 + _VBA_WIDTH_OFFSET   # A: TWF No.
+_TWF_COLUMN_WIDTHS[2] = 22 + _VBA_WIDTH_OFFSET   # C: お客様名
+
 
 def _make_fill(hex_color: str) -> PatternFill:
     return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
@@ -170,6 +181,7 @@ def create_header(
     issue_date: Optional[datetime.date] = None,
     branch: Optional[BranchSettings] = None,
     title: Optional[str] = None,
+    twf_layout: bool = False,
 ) -> None:
     """回答書のヘッダー（行1〜6）を作成する。
 
@@ -181,6 +193,8 @@ def create_header(
         branch: 営業所設定（L列ヘッダー切替用）
         title: タイトル文字列（Noneなら「納　期　回　答　書」。
             長いタイトルはフォントを縮小して表示する）
+        twf_layout: TrueならTWF専用レイアウト（A=TWF No., C=お客様名）の
+            ヘッダーラベル・列幅を使う。external修飾は適用しない
     """
     if issue_date is None:
         issue_date = datetime.date.today()
@@ -240,9 +254,15 @@ def create_header(
     header_align = Alignment(horizontal="center", vertical="center")
 
     # remarks_mode=external のときL列ヘッダーを「連絡事項」に変更
-    labels = list(_HEADER_LABELS)
-    if branch and branch.remarks_mode == "external":
-        labels[11] = "連絡事項"
+    # （TWFレイアウトはL列=弊社注番固定なので適用しない）
+    if twf_layout:
+        labels = list(_TWF_HEADER_LABELS)
+        widths = _TWF_COLUMN_WIDTHS
+    else:
+        labels = list(_HEADER_LABELS)
+        widths = _COLUMN_WIDTHS
+        if branch and branch.remarks_mode == "external":
+            labels[11] = "連絡事項"
 
     for col_idx, label in enumerate(labels, start=1):
         cell = ws.cell(row=6, column=col_idx)
@@ -254,7 +274,7 @@ def create_header(
     ws.row_dimensions[6].height = 28
 
     # 列幅設定
-    for col_idx, width in enumerate(_COLUMN_WIDTHS, start=1):
+    for col_idx, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
 
@@ -329,6 +349,39 @@ def copy_data_row(
     if target_row % 2 == 0:
         for col in range(1, 13):
             ws.cell(row=target_row, column=col).fill = _FILL_EVEN
+
+
+def copy_twf_data_row(
+    ws: Worksheet,
+    target_row: int,
+    report_row: ReportRow,
+    twf_number: str,
+    twf_customer: str,
+) -> None:
+    """TWF専用レイアウトのデータ行を書き込む（期間限定。twf.py参照）。
+
+    copy_data_rowで通常レイアウトを書いた後、A列をTWF No.、
+    C列をお客様名に差し替える。D〜L列は通常版と同一のため、
+    書式エンジン（色分け・数値書式・罫線）はそのまま機能する。
+
+    Args:
+        ws: 対象ワークシート
+        target_row: 書き込み先行番号
+        report_row: 書き込みデータ
+        twf_number: TWF No.（例: "003281"。先頭ゼロ保持のため文字列で書き込む）
+        twf_customer: お客様名（例: "三友工業様"。なければ空欄）
+    """
+    copy_data_row(ws, target_row, report_row, external_comment=None)
+
+    # A列: 受注日 → TWF No.（番号なしは空欄）
+    cell_a = ws.cell(row=target_row, column=1)
+    cell_a.value = twf_number or None
+    cell_a.alignment = Alignment(horizontal="center")
+
+    # C列: 貴社注番 → お客様名
+    cell_c = ws.cell(row=target_row, column=3)
+    cell_c.value = twf_customer or None
+    cell_c.alignment = Alignment(horizontal="left")
 
 
 # ============================================

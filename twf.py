@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from nouki_kaitou.models import OrderRow, ReportResult
 
@@ -107,40 +108,90 @@ def remove_twf_text(text: str) -> str:
     return _TWF_REMOVE_RE.sub("", text)
 
 
-def format_twf_remark(comment: str) -> str:
-    """コメント（明細）のTWF記載を備考表示用に整形する（TWF専用回答書のK列用）。
+# ============================================
+# TWF記載の構造化パース（専用レイアウト用）
+# ============================================
+@dataclass
+class TwfDetailInfo:
+    """TWF記載を分解した結果（TWF専用回答書の列表示用）
 
-    「TWFNo.003243　新成（株）様」→「No.003243 新成（株）様」
-    先頭のTWFを落として「No.」に統一し、連続空白は1つに圧縮する。
-    後続テキスト（得意先名・ステータスメモ等）は分類せずそのまま表示。
-    TWF記載がなければ空文字を返す。
+    「TWFNo.003243　三友工業様　お持ち帰り」
+    → number="003243", customer="三友工業様", memo="お持ち帰り"
     """
+
+    number: str = ""    # 番号（半角化済み。「不明」もあり得る。なければ""）
+    customer: str = ""  # お客様名（最初の「様」まで。「様向け」特例あり）
+    memo: str = ""      # 備考メモ（お持ち帰り・サービス品・着日等）
+
+
+_TWF_NUM_RE = re.compile(r"^([0-9０-９]+|不明)")
+
+
+def _split_customer_memo(tail: str) -> tuple[str, str]:
+    """後続テキストをお客様名と備考メモに振り分ける。
+
+    ルール（実データ125明細の分析に基づく）:
+    - 最初の「様」まで（直後に「向け」が続く場合はそこまで）→ お客様名
+    - 残り → 備考メモ
+    - 「様」がなければ全文を備考メモへ（社名でも誤分類より安全側に倒す）
+    """
+    idx = tail.find("様")
+    if idx < 0:
+        return "", tail
+    end = idx + 1
+    if tail[end:end + 2] == "向け":
+        end += 2
+    return tail[:end].strip(), tail[end:].strip()
+
+
+def parse_twf_comment(comment: str) -> TwfDetailInfo | None:
+    """コメント（明細）のTWF記載を構造化する。TWF記載がなければNone。"""
     if not comment:
-        return ""
+        return None
     m = _TWF_EXTRACT_RE.search(comment)
     if m is None:
-        return ""
-    rest = re.sub(r"[ \t　]+", " ", m.group(1)).strip()
-    return f"No.{rest}" if rest else "No."
+        return None
+    body = re.sub(r"[ \t　]+", " ", m.group(1)).strip()
+    nm = _TWF_NUM_RE.match(body)
+    if nm:
+        number = unicodedata.normalize("NFKC", nm.group(1))  # 全角数字→半角
+        tail = body[nm.end():].strip()
+    else:
+        number = ""
+        tail = body
+    customer, memo = _split_customer_memo(tail)
+    return TwfDetailInfo(number=number, customer=customer, memo=memo)
 
 
-def build_twf_remark_map(orders: list[OrderRow]) -> dict[str, str]:
-    """注番→整形済みTWF情報のマップを構築する。
+def build_twf_info_map(orders: list[OrderRow]) -> dict[str, TwfDetailInfo]:
+    """注番→TWF情報のマップを構築する（入れ忘れ明細への引き継ぎ用）。
 
-    注番内でTWF記載のない明細（入れ忘れ救済分）に、同注番の他明細の
-    TWF情報を引き継いで表示するために使う。同一注番に複数のTWF記載が
-    ある場合は最初に出現した明細の記載を採用する。
+    同一注番に複数のTWF記載がある場合は最初に出現した明細を採用する。
+    引き継ぐのは番号とお客様名のみ（memoは明細固有のため利用側で捨てる）。
     """
-    remark_map: dict[str, str] = {}
+    info_map: dict[str, TwfDetailInfo] = {}
     for row in orders:
         order_num = row.order_number.strip()
-        if order_num in remark_map:
+        if order_num in info_map:
             continue
-        if is_twf_comment(row.comment_detail):
-            formatted = format_twf_remark(row.comment_detail)
-            if formatted:
-                remark_map[order_num] = formatted
-    return remark_map
+        info = parse_twf_comment(row.comment_detail)
+        if info is not None:
+            info_map[order_num] = info
+    return info_map
+
+
+def twf_sort_key(
+    number: str, order_number: str, detail_number: str
+) -> tuple[int, int, str, int]:
+    """TWF専用回答書の行ソートキー。
+
+    TWF No.昇順 → 同一No.内は注番→明細順。番号なし・「不明」は末尾。
+    """
+    detail_str = str(detail_number).strip()
+    detail = int(detail_str) if detail_str.isdigit() else 0
+    if number.isdigit():
+        return (0, int(number), order_number.strip(), detail)
+    return (1, 0, order_number.strip(), detail)
 
 
 # ============================================

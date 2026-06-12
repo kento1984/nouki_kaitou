@@ -29,6 +29,7 @@ from nouki_kaitou.delivery_calc import (
 )
 from nouki_kaitou.excel_writer import (
     copy_data_row,
+    copy_twf_data_row,
     create_header,
     format_report,
 )
@@ -57,9 +58,11 @@ from nouki_kaitou.twf import (
     TWF_NOTICE_EXCEL,
     TWF_REPORT_TITLE,
     TWF_SHEET_PREFIX,
-    build_twf_remark_map,
-    format_twf_remark,
+    TwfDetailInfo,
+    build_twf_info_map,
+    parse_twf_comment,
     remove_twf_text,
+    twf_sort_key,
 )
 from nouki_kaitou.utils import (
     build_report_filename,
@@ -415,7 +418,10 @@ def create_delivery_report(
     sheet_prefix = TWF_SHEET_PREFIX if twf_mode else ""
     report_title = TWF_REPORT_TITLE if twf_mode else None
     ws.title = build_sheet_name(customer_name, rep_name, prefix=sheet_prefix)
-    create_header(ws, customer_name, rep_name, today, branch, title=report_title)
+    create_header(
+        ws, customer_name, rep_name, today, branch,
+        title=report_title, twf_layout=twf_mode,
+    )
 
     current_row = 7
     is_external_mode = branch is not None and branch.remarks_mode == "external"
@@ -425,10 +431,12 @@ def create_delivery_report(
     if rep_name == "__OTHER__" and rep_master_ws is not None:
         registered_rep_list = get_rep_list(customer_name, rep_master_ws)
 
-    # TWFモード: 注番→整形済みTWF情報（入れ忘れ明細への引き継ぎ用）
-    twf_remark_map: dict[str, str] = (
-        build_twf_remark_map(source_data) if twf_mode else {}
+    # TWFモード: 注番→TWF情報（入れ忘れ明細への引き継ぎ用）と
+    # 表示行の一時保持（TWF No.昇順ソートのため2パスで書き込む）
+    twf_info_map: dict[str, TwfDetailInfo] = (
+        build_twf_info_map(source_data) if twf_mode else {}
     )
+    twf_pending: list[tuple[tuple, TwfDetailInfo, ReportRow]] = []
 
     # 情報収集用
     confirmed_orders: list[HistoryRecord] = []
@@ -525,26 +533,50 @@ def create_delivery_report(
             delivery_status = "納品済み"
             report_row.delivery_answer = "納品済み"
 
-        # TWFモード: K列備考にTWF情報を整形表示（「No.003243 新成（株）様」形式）。
-        # TWF記載のない明細（入れ忘れ救済分）は同注番の他明細から引き継ぐ。
-        # 既存の備考内容（build_report_rowでTWF記載除去済み）が残る場合は
-        # 「TWF情報 ／ 既存備考」で共存させる
         if twf_mode:
-            twf_info = (
-                format_twf_remark(row.comment_detail)
-                or twf_remark_map.get(order_num, "")
-            )
-            if twf_info:
-                if report_row.remarks:
-                    report_row.remarks = f"{twf_info} ／ {report_row.remarks}"
-                else:
-                    report_row.remarks = twf_info
+            # --- TWF専用レイアウト用のデータ整形 ---
+            # TWF記載を分解（A列=番号, C列=お客様名, K列=メモ+既存備考）。
+            # 記載のない明細（入れ忘れ救済分）は同注番の他明細から
+            # 番号とお客様名のみ引き継ぐ（memoは明細固有なので引き継がない）
+            twf_info = parse_twf_comment(row.comment_detail)
+            if twf_info is None:
+                base = twf_info_map.get(order_num)
+                twf_info = (
+                    TwfDetailInfo(number=base.number, customer=base.customer)
+                    if base else TwfDetailInfo()
+                )
 
-        ext_comment = None
-        if is_external_mode:
-            raw = row.comment_external.strip()
-            ext_comment = clean_external_comment(raw) if raw else ""
-        copy_data_row(ws, current_row, report_row, ext_comment)
+            # K列: TWFメモ + 既存備考（build_report_rowでTWF記載除去済み）
+            if twf_info.memo:
+                report_row.remarks = (
+                    f"{twf_info.memo} ／ {report_row.remarks}"
+                    if report_row.remarks else twf_info.memo
+                )
+
+            # 納入先名の補強: ワンタイム出荷先→ご指定先、直送→（メーカー直送）付記
+            place = report_row.delivery_place
+            if place.startswith("ワンタイム出荷先"):
+                place = "ご指定先"
+            is_chokusou = (
+                row.document_type.strip() == "【受注】直送販売"
+                and not is_himozuki
+            )
+            if is_chokusou and place != "お引き取り":
+                place = f"{place}（メーカー直送）"
+            report_row.delivery_place = place
+
+            # TWF No.昇順ソートのため書き込みは後段でまとめて行う
+            twf_pending.append((
+                twf_sort_key(twf_info.number, row.order_number, row.detail_number),
+                twf_info,
+                report_row,
+            ))
+        else:
+            ext_comment = None
+            if is_external_mode:
+                raw = row.comment_external.strip()
+                ext_comment = clean_external_comment(raw) if raw else ""
+            copy_data_row(ws, current_row, report_row, ext_comment)
 
         # --- メーカー名・品名を解決（情報収集用） ---
         manufacturer_name = report_row.manufacturer_name
@@ -586,6 +618,14 @@ def create_delivery_report(
     # データなし
     if current_row == 7:
         return None
+
+    # TWFモード: TWF No.昇順（同一No.内は注番→明細順、番号なしは末尾）で書き込み
+    if twf_mode:
+        twf_pending.sort(key=lambda t: t[0])
+        for i, (_, twf_info, pending_row) in enumerate(twf_pending):
+            copy_twf_data_row(
+                ws, 7 + i, pending_row, twf_info.number, twf_info.customer
+            )
 
     # 書式設定
     format_report(
