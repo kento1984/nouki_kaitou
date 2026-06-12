@@ -180,6 +180,35 @@ def build_twf_info_map(orders: list[OrderRow]) -> dict[str, TwfDetailInfo]:
     return info_map
 
 
+# ============================================
+# 持ち帰り判定（納入先名の「お引き取り」上書き用）
+# ============================================
+# 実データ12明細の表記: お持ち帰り / お持ち帰り済み / お持ち帰り済 /
+# お渡し済み / 6/15or6/16引取りとなります。
+_TWF_PICKUP_RE = re.compile(r"持ち?帰|持帰|引き?取|渡し済")
+
+# 純粋な「お持ち帰り」表記（追加情報なし）→ 備考から消してよい
+_TWF_PICKUP_ONLY_RE = re.compile(r"^お?持ち?帰り?$")
+
+
+def is_twf_pickup_memo(memo: str) -> bool:
+    """TWFメモが持ち帰り・引取系か判定する（納入先を「お引き取り」に上書き）。"""
+    if not memo:
+        return False
+    return bool(_TWF_PICKUP_RE.search(unicodedata.normalize("NFKC", memo)))
+
+
+def is_twf_pickup_only_memo(memo: str) -> bool:
+    """メモが純粋な「お持ち帰り」表記のみか判定する。
+
+    Trueなら納入先「お引き取り」と完全重複のため備考から省略する。
+    「済み」「日程」等の追加情報がある場合はFalse（備考に残す）。
+    """
+    if not memo:
+        return False
+    return bool(_TWF_PICKUP_ONLY_RE.match(unicodedata.normalize("NFKC", memo).strip()))
+
+
 def twf_sort_key(
     number: str, order_number: str, detail_number: str
 ) -> tuple[int, int, str, int]:
@@ -199,6 +228,12 @@ def twf_sort_key(
 # ============================================
 TWF_REPORT_TITLE = "納期回答書（東京ウェルディングフェスタ2026 ご注文分）"
 """TWF専用回答書のタイトル（通常は「納　期　回　答　書」）。"""
+
+TWF_THANKS_EXCEL = (
+    "このたびは『東京ウェルディングフェスタ2026』にて"
+    "多大なるご尽力を賜り、誠にありがとうございました。"
+)
+"""ご連絡事項欄の感謝文（回答書がメールから切り離されても感謝が伝わるように）。"""
 
 TWF_NOTICE_EXCEL = (
     "※本書は「東京ウェルディングフェスタ2026」にてご注文いただきました"

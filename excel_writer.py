@@ -429,6 +429,7 @@ def format_report(
     cache: Optional[CacheStore] = None,
     today: Optional[datetime.date] = None,
     twf_notice: Optional[str] = None,
+    twf_thanks: Optional[str] = None,
     with_auto_filter: bool = False,
 ) -> None:
     """回答書の書式設定を行う。
@@ -447,6 +448,7 @@ def format_report(
         cache: キャッシュストア
         today: 基準日（テスト用）
         twf_notice: TWF展示会注記（指定時のみご連絡事項に赤字表示）
+        twf_thanks: TWF感謝文（指定時のみ注記の上に通常色で表示）
         with_auto_filter: Trueならヘッダー行（行6）〜データ最終行に
             オートフィルタを設定する（TWF専用回答書用）
     """
@@ -477,6 +479,7 @@ def format_report(
         bunno_info_list, bunno_completed_list,
         holidays, cache, today,
         twf_notice=twf_notice,
+        twf_thanks=twf_thanks,
     )
 
     # 印刷設定
@@ -738,6 +741,7 @@ def _write_info_section(
     cache,
     today: datetime.date,
     twf_notice: Optional[str] = None,
+    twf_thanks: Optional[str] = None,
 ) -> int:
     """ご連絡事項と署名セクションを書き込む。返り値は次の空き行。"""
     from nouki_kaitou.tracking import can_direct_track, get_tracking_url
@@ -747,12 +751,13 @@ def _write_info_section(
     has_stockout = bool(stockout_info_list)
     has_bunno = bool(bunno_info_list)
     has_twf_notice = bool(twf_notice)
+    has_twf_thanks = bool(twf_thanks)
 
     row = start_row
 
     # --- ご連絡事項ヘッダー ---
     ws.merge_cells(f"A{row}:G{row}")
-    if has_tracking or has_stockout or has_bunno or has_twf_notice:
+    if has_tracking or has_stockout or has_bunno or has_twf_notice or has_twf_thanks:
         cell = ws.cell(row=row, column=1)
         cell.value = "【ご連絡事項】"
         cell.font = _make_font(size=14, bold=True, color=_HEADER_BG)
@@ -783,7 +788,20 @@ def _write_info_section(
     cell_branch.font = _make_font(size=14, bold=True, color=_HEADER_BG)
     cell_branch.alignment = Alignment(horizontal="center", vertical="top")
 
-    # --- TWF展示会注記（期間限定。twf.py参照） ---
+    # --- TWF感謝文・展示会注記（期間限定。twf.py参照） ---
+    # 感謝文（通常色）→ 赤字注記の順。書いた分だけ行を進め、
+    # 最後に1行進めて後続セクションの開始行を確保する
+    if has_twf_thanks:
+        row += 1
+        ws.merge_cells(f"A{row}:L{row}")
+        cell_thanks = ws.cell(row=row, column=1)
+        cell_thanks.value = twf_thanks
+        cell_thanks.font = _make_font(size=11, bold=True, color=_HEADER_BG)
+        cell_thanks.alignment = Alignment(
+            horizontal="left", vertical="center", wrap_text=True
+        )
+        ws.row_dimensions[row].height = 30
+
     if has_twf_notice:
         row += 1
         ws.merge_cells(f"A{row}:L{row}")
@@ -794,6 +812,8 @@ def _write_info_section(
             horizontal="left", vertical="center", wrap_text=True
         )
         ws.row_dimensions[row].height = 55
+
+    if has_twf_thanks or has_twf_notice:
         row += 1
 
     # --- 送り状情報 ---

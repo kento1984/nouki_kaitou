@@ -58,8 +58,11 @@ from nouki_kaitou.twf import (
     TWF_NOTICE_EXCEL,
     TWF_REPORT_TITLE,
     TWF_SHEET_PREFIX,
+    TWF_THANKS_EXCEL,
     TwfDetailInfo,
     build_twf_info_map,
+    is_twf_pickup_memo,
+    is_twf_pickup_only_memo,
     parse_twf_comment,
     remove_twf_text,
     twf_sort_key,
@@ -546,11 +549,20 @@ def create_delivery_report(
                     if base else TwfDetailInfo()
                 )
 
+            # 持ち帰り系メモ → 納入先名を「お引き取り」に上書き。
+            # 純粋な「お持ち帰り」表記は納入先と完全重複のため備考から省略
+            # （「済み」「日程」等の追加情報付きは備考に残す）
+            memo_for_remarks = twf_info.memo
+            if is_twf_pickup_memo(twf_info.memo):
+                report_row.delivery_place = "お引き取り"
+                if is_twf_pickup_only_memo(twf_info.memo):
+                    memo_for_remarks = ""
+
             # K列: TWFメモ + 既存備考（build_report_rowでTWF記載除去済み）
-            if twf_info.memo:
+            if memo_for_remarks:
                 report_row.remarks = (
-                    f"{twf_info.memo} ／ {report_row.remarks}"
-                    if report_row.remarks else twf_info.memo
+                    f"{memo_for_remarks} ／ {report_row.remarks}"
+                    if report_row.remarks else memo_for_remarks
                 )
 
             # 納入先名: 「ワンタイム出荷先」（SAP内部表現）→「ご指定先」に置換
@@ -626,6 +638,7 @@ def create_delivery_report(
         bunno_info_list, bunno_completed_list,
         holidays, cache, today,
         twf_notice=TWF_NOTICE_EXCEL if twf_mode else None,
+        twf_thanks=TWF_THANKS_EXCEL if twf_mode else None,
         with_auto_filter=twf_mode,
     )
 

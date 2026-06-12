@@ -24,6 +24,7 @@ from nouki_kaitou.twf import (
     TWF_NOTICE_EXCEL,
     TWF_REPORT_TITLE,
     TWF_SHEET_PREFIX,
+    TWF_THANKS_EXCEL,
     TwfDetailInfo,
     build_twf_info_map,
     collect_twf_orders,
@@ -316,6 +317,51 @@ class TestBuildTwfInfoMap:
 
 
 # ============================================
+# 持ち帰り判定（is_twf_pickup_memo / is_twf_pickup_only_memo）
+# ============================================
+class TestTwfPickupMemo:
+    @pytest.mark.parametrize("memo", [
+        "お持ち帰り",
+        "お持ち帰り済み",
+        "お持ち帰り済",
+        "持ち帰り",
+        "お持帰り",          # 表記ゆれ（実データ未出だが許容）
+        "持帰",
+        "6/15or6/16引取りとなります。",
+        "お引き取り希望",
+        "今回のみ旧値 お渡し済み",
+    ])
+    def test_pickup_positive(self, memo):
+        from nouki_kaitou.twf import is_twf_pickup_memo
+        assert is_twf_pickup_memo(memo) is True
+
+    @pytest.mark.parametrize("memo", [
+        "",
+        "三脚Ｂ2ケｻｰﾋﾞｽ",
+        "6/15着",
+        "後日納品日ご連絡",
+        "後日お渡し予定",    # 「渡し済」でないため対象外（未来の受け渡し）
+    ])
+    def test_pickup_negative(self, memo):
+        from nouki_kaitou.twf import is_twf_pickup_memo
+        assert is_twf_pickup_memo(memo) is False
+
+    @pytest.mark.parametrize("memo,expected", [
+        ("お持ち帰り", True),
+        ("持ち帰り", True),
+        ("お持帰り", True),
+        ("お持ち帰り済み", False),   # 状態情報あり→備考に残す
+        ("お持ち帰り済", False),
+        ("6/15or6/16引取りとなります。", False),
+        ("今回のみ旧値 お渡し済み", False),
+        ("", False),
+    ])
+    def test_pickup_only(self, memo, expected):
+        from nouki_kaitou.twf import is_twf_pickup_only_memo
+        assert is_twf_pickup_only_memo(memo) is expected
+
+
+# ============================================
 # twf_sort_key（TWF No.昇順ソート）
 # ============================================
 class TestTwfSortKey:
@@ -604,19 +650,94 @@ class TestCreateDeliveryReportTwf:
     def test_twf_memo_in_remarks(self, tmp_path):
         """メモ部分はK列備考に表示"""
         data = [_make_row(order_number="100",
-                          comment_detail="TWFNo.004982　(有)狩野溶接工業様お持ち帰り")]
+                          comment_detail="TWFNo.002041　先進機設㈱様　三脚Ｂ2ケｻｰﾋﾞｽ")]
         result, ws = self._twf_report(data, tmp_path)
-        assert ws.cell(row=7, column=3).value == "(有)狩野溶接工業様"
-        assert ws.cell(row=7, column=11).value == "お持ち帰り"
+        assert ws.cell(row=7, column=3).value == "先進機設㈱様"
+        assert ws.cell(row=7, column=11).value == "三脚Ｂ2ケｻｰﾋﾞｽ"
 
     def test_twf_memo_coexists_with_existing_remark(self, tmp_path):
         """メモと既存備考は「メモ ／ 既存備考」で共存"""
         data = [_make_row(
             order_number="100",
-            comment_detail="至急対応\nTWFNo.003243　新成様　お持ち帰り",
+            comment_detail="至急対応\nTWFNo.003243　新成様　三脚サービス",
         )]
         result, ws = self._twf_report(data, tmp_path)
-        assert ws.cell(row=7, column=11).value == "お持ち帰り ／ 至急対応"
+        assert ws.cell(row=7, column=11).value == "三脚サービス ／ 至急対応"
+
+    def test_twf_pickup_pure_memo(self, tmp_path):
+        """純粋な「お持ち帰り」→ 納入先「お引き取り」・備考から省略"""
+        data = [_make_row(order_number="100",
+                          comment_detail="TWFNo.004982　(有)狩野溶接工業様お持ち帰り")]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=10).value == "お引き取り"
+        assert ws.cell(row=7, column=11).value is None  # 重複のため省略
+
+    def test_twf_pickup_with_extra_info_keeps_memo(self, tmp_path):
+        """「お持ち帰り済み」→ お引き取り＋備考に残す（状態情報あり）"""
+        data = [_make_row(order_number="100",
+                          comment_detail="TWFNo.004987　東進産業様　お持ち帰り済み")]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=10).value == "お引き取り"
+        assert ws.cell(row=7, column=11).value == "お持ち帰り済み"
+
+    def test_twf_pickup_hikitori_with_date(self, tmp_path):
+        """「6/15or6/16引取りとなります。」→ お引き取り＋日程は備考に残す"""
+        data = [_make_row(order_number="100",
+                          comment_detail="TWFNo.003322　6/15or6/16引取りとなります。")]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=10).value == "お引き取り"
+        assert ws.cell(row=7, column=11).value == "6/15or6/16引取りとなります。"
+
+    def test_twf_pickup_watashizumi(self, tmp_path):
+        """「お渡し済み」→ お引き取り＋備考に残す"""
+        data = [_make_row(order_number="100",
+                          comment_detail="TWFNo.000887　今回のみ旧値　お渡し済み")]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=10).value == "お引き取り"
+        assert ws.cell(row=7, column=11).value == "今回のみ旧値 お渡し済み"
+
+    def test_twf_pickup_not_inherited(self, tmp_path):
+        """memoは引き継がないため、入れ忘れ明細の納入先は上書きされない"""
+        data = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.001　新成様　お持ち帰り"),
+            _make_row(order_number="100", detail_number="20",
+                      comment_detail=""),  # 入れ忘れ
+        ]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.cell(row=7, column=10).value == "お引き取り"  # 明細10
+        assert ws.cell(row=8, column=10).value == "貴社"        # 明細20は従来表示
+
+    def test_twf_thanks_in_info_section(self, tmp_path):
+        """ご連絡事項欄に感謝文＋赤字注記の両方が出る（感謝文が先）"""
+        data = [_make_row(order_number="100", comment_detail="TWFNo.001　新成様")]
+        result, ws = self._twf_report(data, tmp_path)
+        values = [
+            ws.cell(row=r, column=1).value
+            for r in range(7, ws.max_row + 1)
+            if ws.cell(row=r, column=1).value
+        ]
+        assert TWF_THANKS_EXCEL in values
+        assert TWF_NOTICE_EXCEL in values
+        assert values.index(TWF_THANKS_EXCEL) < values.index(TWF_NOTICE_EXCEL)
+
+    def test_normal_mode_no_thanks(self, tmp_path):
+        """通常版には感謝文は出ない"""
+        data = [_make_row()]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        values = [
+            ws.cell(row=r, column=1).value
+            for r in range(7, ws.max_row + 1)
+            if ws.cell(row=r, column=1).value
+        ]
+        assert TWF_THANKS_EXCEL not in values
 
     def test_twf_inherited_number_and_customer(self, tmp_path):
         """入れ忘れ明細は同注番から番号とお客様名を引き継ぐ（memoは引き継がない）"""
