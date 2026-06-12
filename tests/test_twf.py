@@ -721,6 +721,65 @@ class TestCreateDeliveryReportTwf:
         assert TWF_NOTICE_EXCEL in values
         assert values.index(TWF_THANKS_EXCEL) < values.index(TWF_NOTICE_EXCEL)
 
+    def test_twf_total_row_mixed(self, tmp_path):
+        """合計行: 数値行のみ合計、未確定行があれば注記を併記"""
+        data = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.001　新成様",
+                      net_amount="50000"),
+            _make_row(order_number="100", detail_number="20",
+                      comment_detail="TWFNo.001　新成様",
+                      net_amount="30000"),
+            # 仮単価（1円）→ 金額「確認中」になる行
+            _make_row(order_number="100", detail_number="30",
+                      comment_detail="TWFNo.001　新成様",
+                      unit_price="1", net_amount="1"),
+        ]
+        result, ws = self._twf_report(data, tmp_path)
+        total_row = 10  # データ7〜9行 → 合計は10行目
+        assert ws.cell(row=total_row, column=6).value == "展示会ご成約合計（税抜）："
+        assert ws.cell(row=total_row, column=8).value == 80000
+        assert ws.cell(row=total_row, column=8).number_format == '"￥"#,##0'
+        assert ws.cell(row=total_row, column=9).value == "※金額確定分の合計です"
+        # 税抜注記は1行下がる
+        assert ws.cell(row=total_row + 1, column=7).value == "※表示金額は税抜きです"
+
+    def test_twf_total_row_all_confirmed_no_note(self, tmp_path):
+        """全行確定済みなら注記は出ない"""
+        data = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.001　新成様", net_amount="50000"),
+            _make_row(order_number="100", detail_number="20",
+                      comment_detail="TWFNo.001　新成様", net_amount="30000"),
+        ]
+        result, ws = self._twf_report(data, tmp_path)
+        total_row = 9
+        assert ws.cell(row=total_row, column=8).value == 80000
+        assert ws.cell(row=total_row, column=9).value is None  # 注記なし
+
+    def test_twf_total_excluded_from_autofilter(self, tmp_path):
+        """合計行はオートフィルタ範囲外"""
+        data = [
+            _make_row(order_number="100", detail_number="10",
+                      comment_detail="TWFNo.001", net_amount="50000"),
+        ]
+        result, ws = self._twf_report(data, tmp_path)
+        assert ws.auto_filter.ref == "A6:L7"  # 合計行（8行目）は含まない
+
+    def test_normal_mode_no_total_row(self, tmp_path):
+        """通常版には合計行なし（税抜注記がデータ直下のまま）"""
+        data = [_make_row(net_amount="50000")]
+        cache = _make_cache()
+        result = create_delivery_report(
+            data, "テスト商事", {},
+            cache, tmp_path, {}, BRANCH, EXEC_TIME,
+            today=TODAY,
+        )
+        wb = load_workbook(result.file_path)
+        ws = wb.active
+        assert ws.cell(row=8, column=7).value == "※表示金額は税抜きです"
+        assert ws.cell(row=8, column=6).value is None  # 合計ラベルなし
+
     def test_normal_mode_no_thanks(self, tmp_path):
         """通常版には感謝文は出ない"""
         data = [_make_row()]

@@ -431,6 +431,7 @@ def format_report(
     twf_notice: Optional[str] = None,
     twf_thanks: Optional[str] = None,
     with_auto_filter: bool = False,
+    with_twf_total: bool = False,
 ) -> None:
     """回答書の書式設定を行う。
 
@@ -451,6 +452,8 @@ def format_report(
         twf_thanks: TWF感謝文（指定時のみ注記の上に通常色で表示）
         with_auto_filter: Trueならヘッダー行（行6）〜データ最終行に
             オートフィルタを設定する（TWF専用回答書用）
+        with_twf_total: Trueならデータ最終行の直下に合計行を挿入する
+            （TWF専用回答書用。金額列が数値の行のみ合計する固定値方式）
     """
     if today is None:
         today = datetime.date.today()
@@ -458,12 +461,19 @@ def format_report(
     # データ行の全書式を1パスで適用（5ループ→1ループに統合して高速化）
     _apply_all_data_formatting(ws, last_data_row, today, branch)
 
-    # オートフィルタ（ヘッダー行6〜データ最終行。マージセルは行1-5なので干渉しない）
+    # オートフィルタ（ヘッダー行6〜データ最終行。マージセルは行1-5なので干渉しない。
+    # 合計行はフィルタ範囲外）
     if with_auto_filter:
         ws.auto_filter.ref = f"A6:L{last_data_row}"
 
+    # TWF合計行（データ直下に1行挿入。後続の注記・ご連絡事項は1行下がる）
+    total_offset = 0
+    if with_twf_total:
+        _write_twf_total_row(ws, last_data_row)
+        total_offset = 1
+
     # 税抜き注記
-    note_row = last_data_row + 1
+    note_row = last_data_row + 1 + total_offset
     ws.merge_cells(f"G{note_row}:H{note_row}")
     cell_note = ws.cell(row=note_row, column=7)
     cell_note.value = "※表示金額は税抜きです"
@@ -472,7 +482,7 @@ def format_report(
     ws.row_dimensions[note_row].height = 16
 
     # ご連絡事項と署名
-    info_row = last_data_row + 2
+    info_row = last_data_row + 2 + total_offset
     info_row = _write_info_section(
         ws, info_row, branch,
         tracking_info_list, stockout_info_list,
@@ -497,6 +507,59 @@ def format_report(
     ws.page_margins.bottom = 0.2
     ws.page_margins.header = 0.0
     ws.page_margins.footer = 0.0
+
+
+def _write_twf_total_row(ws: Worksheet, last_data_row: int) -> None:
+    """TWF専用回答書の合計行を書き込む（期間限定。twf.py参照）。
+
+    データ最終行の直下に、金額列（H列）が数値の行のみを合計した
+    固定値を表示する。「確認中」等の文字列行が1行でもあれば
+    「※金額確定分の合計です」の注記を併記する。
+
+    レイアウト: F:G=ラベル / H=合計値 / I:L=注記。
+    上罫線はゴールド二重線（会計帳票の合計線）、帯は薄いゴールド。
+    """
+    total = 0
+    has_unconfirmed = False
+    for row in range(7, last_data_row + 1):
+        val = ws.cell(row=row, column=8).value
+        if isinstance(val, (int, float)):
+            total += val
+        else:
+            has_unconfirmed = True
+
+    total_row = last_data_row + 1
+    double_top = Side(style="double", color=_ACCENT_BG)
+    band_fill = _make_fill("F5EEDC")  # アクセント色（ゴールド）の淡色
+
+    for col in range(6, 13):  # F〜L
+        cell = ws.cell(row=total_row, column=col)
+        cell.border = Border(top=double_top)
+        cell.fill = band_fill
+
+    # ラベル（F:G結合・右寄せ・紺太字）
+    ws.merge_cells(f"F{total_row}:G{total_row}")
+    cell_label = ws.cell(row=total_row, column=6)
+    cell_label.value = "展示会ご成約合計（税抜）："
+    cell_label.font = _make_font(size=11, bold=True, color=_TITLE_BG)
+    cell_label.alignment = Alignment(horizontal="right", vertical="center")
+
+    # 合計値（H列・￥書式・太字12pt）
+    cell_total = ws.cell(row=total_row, column=8)
+    cell_total.value = int(total) if total == int(total) else total
+    cell_total.font = _make_font(size=12, bold=True, color=_TITLE_BG)
+    cell_total.number_format = '"￥"#,##0'
+    cell_total.alignment = Alignment(horizontal="right", vertical="center")
+
+    # 注記（I:L結合・グレー9pt。未確定行がある場合のみ）
+    if has_unconfirmed:
+        ws.merge_cells(f"I{total_row}:L{total_row}")
+        cell_note = ws.cell(row=total_row, column=9)
+        cell_note.value = "※金額確定分の合計です"
+        cell_note.font = _make_font(size=9, color="787878")
+        cell_note.alignment = Alignment(horizontal="left", vertical="center")
+
+    ws.row_dimensions[total_row].height = 22
 
 
 def _apply_delivery_colors(

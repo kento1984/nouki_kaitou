@@ -640,6 +640,7 @@ def create_delivery_report(
         twf_notice=TWF_NOTICE_EXCEL if twf_mode else None,
         twf_thanks=TWF_THANKS_EXCEL if twf_mode else None,
         with_auto_filter=twf_mode,
+        with_twf_total=twf_mode,
     )
 
     # 保存
