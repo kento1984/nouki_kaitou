@@ -39,6 +39,7 @@ __pycache__/
 /*.xls
 /*.xlsx
 /*.xlsm
+/受注伝票一覧エクスポート.txt
 /*.bas
 /*.lnk
 /*.bat

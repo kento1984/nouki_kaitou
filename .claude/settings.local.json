@@ -26,7 +26,18 @@
       "Bash(mv:*)",
       "WebSearch",
       "WebFetch(domain:www.niigataunyu.co.jp)",
-      "WebFetch(domain:www2.nuis.co.jp)"
+      "WebFetch(domain:www2.nuis.co.jp)",
+      "Bash(dir \"D:\\\\repos\\\\nouki_kaitou\\\\nouki_kaitou\")",
+      "Bash(C:/Users/kento.kashiwabara/AppData/Local/Programs/Python/Python312/python.exe -m pytest tests/ --tb=short)",
+      "Bash(C:/Users/kento.kashiwabara/AppData/Local/Programs/Python/Python312/python.exe -m PyInstaller nouki_kaitou.spec --clean --noconfirm)",
+      "Bash(cp \"D:/repos/nouki_kaitou/dist/納期回答書作成.exe\" \"C:/Users/kento.kashiwabara/Desktop/納期回答書ツールフォルダ（DT\\)/納期回答書作成.exe\")",
+      "Read(//c/Users/kento.kashiwabara/Desktop/納期回答書ツールフォルダ（DT\\)/**)",
+      "Read(//d/repos/**)",
+      "Bash(C:/Users/kento.kashiwabara/AppData/Local/Programs/Python/Python312/python.exe -X utf8 -c ' *)",
+      "Bash(tasklist)",
+      "Bash(py -3.12 -m pytest nouki_kaitou/tests -q)",
+      "Bash(py -3.12 -m pytest tests -q)",
+      "Bash(py -3.12 -m pytest tests/test_twf.py -q)"
     ]
   }
 }
