@@ -299,6 +299,9 @@ class ReportResult:
 
     has_confirming: bool = False        # 確認中の伝票があるか
 
+    is_twf: bool = False
+    """TWF展示会専用回答書ならTrue（期間限定機能。twf.py参照）"""
+
 
 # ============================================
 # 列位置マッピング（VBA: GetColumnPositionsの返り値 Dictionary）

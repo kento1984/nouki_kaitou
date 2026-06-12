@@ -169,6 +169,7 @@ def create_header(
     rep_name: str = "",
     issue_date: Optional[datetime.date] = None,
     branch: Optional[BranchSettings] = None,
+    title: Optional[str] = None,
 ) -> None:
     """回答書のヘッダー（行1〜6）を作成する。
 
@@ -178,6 +179,8 @@ def create_header(
         rep_name: 担当者名（担当者分割時）
         issue_date: 発行日（Noneなら今日）
         branch: 営業所設定（L列ヘッダー切替用）
+        title: タイトル文字列（Noneなら「納　期　回　答　書」。
+            長いタイトルはフォントを縮小して表示する）
     """
     if issue_date is None:
         issue_date = datetime.date.today()
@@ -188,8 +191,12 @@ def create_header(
     # --- 行1: タイトル ---
     ws.merge_cells("A1:L1")
     cell_title = ws["A1"]
-    cell_title.value = "納　期　回　答　書"
-    cell_title.font = _make_font(size=26, bold=True, color=_TITLE_FG)
+    if title is None:
+        title = "納　期　回　答　書"
+    # 長いタイトル（TWF専用回答書等）はセル幅に収まるよう縮小
+    title_size = 26 if len(title) <= 15 else 18
+    cell_title.value = title
+    cell_title.font = _make_font(size=title_size, bold=True, color=_TITLE_FG)
     cell_title.fill = _make_fill(_TITLE_BG)
     cell_title.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 55
@@ -368,6 +375,7 @@ def format_report(
     holidays: HolidayMap | None = None,
     cache: Optional[CacheStore] = None,
     today: Optional[datetime.date] = None,
+    twf_notice: Optional[str] = None,
 ) -> None:
     """回答書の書式設定を行う。
 
@@ -384,6 +392,7 @@ def format_report(
         holidays: 祝日辞書
         cache: キャッシュストア
         today: 基準日（テスト用）
+        twf_notice: TWF展示会注記（指定時のみご連絡事項に赤字表示）
     """
     if today is None:
         today = datetime.date.today()
@@ -407,6 +416,7 @@ def format_report(
         tracking_info_list, stockout_info_list,
         bunno_info_list, bunno_completed_list,
         holidays, cache, today,
+        twf_notice=twf_notice,
     )
 
     # 印刷設定
@@ -667,22 +677,22 @@ def _write_info_section(
     holidays,
     cache,
     today: datetime.date,
+    twf_notice: Optional[str] = None,
 ) -> int:
     """ご連絡事項と署名セクションを書き込む。返り値は次の空き行。"""
     from nouki_kaitou.tracking import can_direct_track, get_tracking_url
-    from nouki_kaitou.utils import get_special_notice_excel, to_circled_number
+    from nouki_kaitou.utils import to_circled_number
 
     has_tracking = bool(tracking_info_list)
     has_stockout = bool(stockout_info_list)
     has_bunno = bool(bunno_info_list)
-    special_notice = get_special_notice_excel(today)
-    has_special_notice = special_notice is not None
+    has_twf_notice = bool(twf_notice)
 
     row = start_row
 
     # --- ご連絡事項ヘッダー ---
     ws.merge_cells(f"A{row}:G{row}")
-    if has_tracking or has_stockout or has_bunno or has_special_notice:
+    if has_tracking or has_stockout or has_bunno or has_twf_notice:
         cell = ws.cell(row=row, column=1)
         cell.value = "【ご連絡事項】"
         cell.font = _make_font(size=14, bold=True, color=_HEADER_BG)
@@ -713,12 +723,12 @@ def _write_info_section(
     cell_branch.font = _make_font(size=14, bold=True, color=_HEADER_BG)
     cell_branch.alignment = Alignment(horizontal="center", vertical="top")
 
-    # --- 特別注意文（4月SAP切替対応・2026-04-24まで） ---
-    if has_special_notice:
+    # --- TWF展示会注記（期間限定。twf.py参照） ---
+    if has_twf_notice:
         row += 1
         ws.merge_cells(f"A{row}:L{row}")
         cell_notice = ws.cell(row=row, column=1)
-        cell_notice.value = special_notice
+        cell_notice.value = twf_notice
         cell_notice.font = _make_font(size=11, bold=True, color="B40000")
         cell_notice.alignment = Alignment(
             horizontal="left", vertical="center", wrap_text=True

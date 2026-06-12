@@ -2,32 +2,37 @@
 
 ## ファイル構成
 
-- `nouki_kaitou/` パッケージ（Python実装）
-  - `main.py` - エントリーポイント（CLI + GUI起動）
-  - `gui.py` - tkinter GUI（顧客選択・期間指定）
-  - `data_loader.py` - SAPデータ読込（.xls）
-  - `delivery_calc.py` - 納期計算コア
-  - `report_generator.py` - レポート生成・分類処理
-  - `email_builder.py` - メール本文生成
-  - `bunno.py` - 分納処理
-  - `confirming.py` - 確認中一覧参照
-  - `history.py` - 送付履歴管理
-  - `customer.py` - 顧客マスター参照
-  - `manufacturer.py` - メーカーマスター参照
-  - `representative.py` - 担当者マスター参照
-  - `tracking.py` - 送り状情報抽出
-  - `stockout.py` - 欠品情報抽出
-  - `business_days.py` - 営業日計算
-  - `excel_writer.py` - Excel出力
-  - `models.py` - データモデル定義
-  - `config.py` - 設定読込（祝日・営業所設定）
-  - `cache.py` - キャッシュ構築（全マスターデータ）
-  - `sendai_delivery.py` - 仙台営業所の配送パターンベース納期計算
-  - `utils.py` - ユーティリティ関数
+リポジトリルート自体が `nouki_kaitou` パッケージ（`D:\repos\nouki_kaitou` 直下にフラット配置。importは `nouki_kaitou.models` 等）。
+
+- `main.py` - エントリーポイント（CLI + GUI起動）
+- `run_gui.py` - PyInstaller用エントリーポイント（specの`Analysis`対象）
+- `gui.py` - tkinter GUI（期間指定モード / 伝票番号指定モードの切替＋顧客選択）
+- `data_loader.py` - SAPデータ読込（.xls）
+- `delivery_calc.py` - 納期計算コア
+- `report_generator.py` - レポート生成・分類処理
+- `email_builder.py` - メール本文生成
+- `bunno.py` - 分納処理
+- `confirming.py` - 確認中一覧参照
+- `history.py` - 送付履歴管理
+- `customer.py` - 顧客マスター参照
+- `manufacturer.py` - メーカーマスター参照
+- `representative.py` - 担当者マスター参照
+- `tracking.py` - 送り状情報抽出
+- `stockout.py` - 欠品情報抽出
+- `business_days.py` - 営業日計算
+- `excel_writer.py` - Excel出力
+- `models.py` - データモデル定義
+- `config.py` - 設定読込（祝日・営業所設定）
+- `cache.py` - キャッシュ構築（全マスターデータ）
+- `sendai_delivery.py` - 仙台営業所の配送パターンベース納期計算
+- `twf.py` - TWF展示会受注の専用回答書サポート（**期間限定**。後述）
+- `utils.py` - ユーティリティ関数
+- `tests/` - pytestテスト
+- `dev_scripts/` - 調査・検証用スクリプト（`scan_twf.py` 等）
 
 ## 業務背景
 
-マツモト産業の納期回答書ツール。SAPの受注データから納期を計算し、お客様向けの納期回答書PDF + メールを自動生成する。
+マツモト産業の納期回答書ツール。SAPの受注データから納期を計算し、お客様向けの納期回答書（Excel .xlsx）+ メールを自動生成する（メールにはxlsxをそのまま添付。PDF化はしない）。
 
 ### 伝票タイプ
 
@@ -45,6 +50,19 @@
 
 - 納期回答は1日2回実行
 - 12/31は「未確定」を示す特殊値（指定納期・受注納期どちらも）
+
+## TWF展示会受注の専用回答書（期間限定・2026/7/3まで）
+
+東京ウェルディングフェスタ（TWF2026、2026/6/12-13開催）経由の受注を、通常回答書とは別の専用回答書で出力する機能。`twf.py` に集約。
+
+- **判定**: コメント（明細）を NFKC正規化＋大文字化＋空白除去 した文字列に「TWFNO」を含めば展示会受注（例: 「TWFNo.003243　新成（株）」「ＴＷＦ№3243」）。「ＴＷＦ特価」等のNoなし記載は対象外
+- **注番伝播**: 同一注番の1明細でも該当すれば注番の全明細が対象（手入力の入れ忘れ対策）
+- **出力**: 通常回答書からTWF注番を完全除外し、TWF専用回答書（タイトル・シート名・ファイル名に展示会識別）を別ファイルで生成。**2ファイルを1通のメールに添付**（TWF受注なしの顧客は従来どおり1ファイル）
+- **履歴**: TWF伝票も送付履歴・確認中一覧に通常どおり記録するが、**TWF回答書の表示では履歴を無視**して毎回全件表示（客は毎回最新状況一覧を受け取る）。期限後は確定済み分が履歴スキップされ通常運用に自然合流
+- **TWFパス限定ルール**: 処理完了＋履歴に確定記録あり → 「納品済み」表示に上書き
+- **期間ゲート**: `twf.TWF_END_DATE`（2026/7/3）。期限後・TWF受注ゼロの顧客は従来と完全同一の出力（完全オプトイン設計）
+- **検証**: `python dev_scripts/scan_twf.py [10PM.XLSパス]` で検知一覧＋近似値（TWFを含むがTWFNOでない記載）を表示
+- **削除手順（運用終了後）**: `twf.py`・`tests/test_twf.py`・`dev_scripts/scan_twf.py` を削除し、`main.py`/`report_generator.py`/`excel_writer.py`/`email_builder.py`/`models.py`/`utils.py` の twf 参照（import・パラメータのTWF分岐）を除去
 
 ## 納期計算ルール（重要）
 
@@ -290,3 +308,5 @@
 - 180日ルール（年またぎ日付の翌年補正）の値が固定。設定可能にするか検討
 - 分納判定のコメント（社内）対応 — 現在コメント（明細）のみ参照。コメント（社内）にも分納情報がある場合がある
 - VBA完全廃止 — 十分な並行運用テスト後にVBAからPythonに完全移行
+- TWF展示会機能の削除 — 期限（2026/7/3）を過ぎて展示会受注の納品が完了したら削除（手順は「TWF展示会受注の専用回答書」セクション参照）
+- ~~4月SAP切替の特別注意文~~ — 2026/6に削除済み（期限切れコードの撤去）

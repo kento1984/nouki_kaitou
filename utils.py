@@ -187,42 +187,48 @@ def build_report_filename(
     execution_time: datetime.datetime,
     rep_name: str = "",
     order_numbers: list[str] | None = None,
+    filename_tag: str = "",
 ) -> str:
     """納期回答書のファイル名を生成する。
 
     通常: 納期回答書_顧客名様_yyyymmdd.xlsx
     担当者分割: 納期回答書_顧客名様_担当者名様_yyyymmdd.xlsx
     注番指定: 納期回答書_顧客名様_注番_yyyymmdd.xlsx（複数なら「複数注番」）
+    タグ指定: 納期回答書<タグ>_顧客名様_yyyymmdd.xlsx（例: 【展示会】）
     """
     date_str = execution_time.strftime("%Y%m%d")
 
     # ファイル名に使えない文字を置換
     safe_customer = _sanitize_filename(customer_name)
+    prefix = f"納期回答書{_sanitize_filename(filename_tag)}" if filename_tag else "納期回答書"
 
     if order_numbers:
         if len(order_numbers) == 1:
             order_part = order_numbers[0]
         else:
             order_part = "複数注番"
-        return f"納期回答書_{safe_customer}様_{order_part}_{date_str}.xlsx"
+        return f"{prefix}_{safe_customer}様_{order_part}_{date_str}.xlsx"
 
     if rep_name:
         safe_rep = _sanitize_filename(rep_name)
-        return f"納期回答書_{safe_customer}様_{safe_rep}様_{date_str}.xlsx"
+        return f"{prefix}_{safe_customer}様_{safe_rep}様_{date_str}.xlsx"
 
-    return f"納期回答書_{safe_customer}様_{date_str}.xlsx"
+    return f"{prefix}_{safe_customer}様_{date_str}.xlsx"
 
 
-def build_sheet_name(customer_name: str, rep_name: str = "") -> str:
+def build_sheet_name(
+    customer_name: str, rep_name: str = "", prefix: str = ""
+) -> str:
     """シート名を生成する（31文字制限）。
 
     通常: 顧客名様
     担当者分割: 顧客名_担当者名様
+    プレフィックス指定: <プレフィックス>顧客名様（例: 展示会_）
     """
     if rep_name:
-        name = f"{customer_name}_{rep_name}様"
+        name = f"{prefix}{customer_name}_{rep_name}様"
     else:
-        name = f"{customer_name}様"
+        name = f"{prefix}{customer_name}様"
 
     # Excelのシート名は31文字制限
     if len(name) > 31:
@@ -435,38 +441,3 @@ def normalize_item_group_code(value: object) -> str:
     return s
 
 
-# ============================================
-# 4月SAP切替対応の特別注意文（2026-04-24まで。以降この関数と呼出箇所を削除）
-# ============================================
-_SPECIAL_NOTICE_EXCEL = (
-    "※4月のシステム切替の影響により、納期回答が遅れましたことを"
-    "お詫び申し上げます。既にお届け済みの商品につきましても"
-    "納期回答が届く場合がございます。何卒ご了承ください。"
-)
-
-_SPECIAL_NOTICE_EMAIL = (
-    "なお、4月のシステム切替の影響により納期回答が"
-    "遅れましたことをお詫び申し上げます。"
-    "既にお届け済みの商品につきましても納期回答が届く場合が"
-    "ございます。何卒ご了承ください。"
-)
-
-_SPECIAL_NOTICE_END_DATE = datetime.date(2026, 4, 24)
-
-
-def get_special_notice_excel(today: datetime.date | None = None) -> str | None:
-    """Excel「ご連絡事項」欄用の特別注意文。期間外ならNone。"""
-    if today is None:
-        today = datetime.date.today()
-    if today <= _SPECIAL_NOTICE_END_DATE:
-        return _SPECIAL_NOTICE_EXCEL
-    return None
-
-
-def get_special_notice_email(today: datetime.date | None = None) -> str | None:
-    """メール本文用の特別注意文。期間外ならNone。"""
-    if today is None:
-        today = datetime.date.today()
-    if today <= _SPECIAL_NOTICE_END_DATE:
-        return _SPECIAL_NOTICE_EMAIL
-    return None

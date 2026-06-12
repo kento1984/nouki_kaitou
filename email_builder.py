@@ -91,6 +91,7 @@ def build_email_body_html(
     holidays: HolidayMap | None = None,
     cache: Optional[CacheStore] = None,
     today: Optional[datetime.date] = None,
+    twf_notice: Optional[str] = None,
 ) -> str:
     """HTMLメール本文を生成する。
 
@@ -104,6 +105,7 @@ def build_email_body_html(
         holidays: 祝日辞書
         cache: キャッシュストア
         today: 基準日（テスト用）
+        twf_notice: TWF展示会注記（指定時のみ挨拶文直後に表示）
 
     Returns:
         HTML形式のメール本文
@@ -124,11 +126,9 @@ def build_email_body_html(
     # 挨拶文
     parts.append(_build_greeting(customer_name, branch))
 
-    # 特別注意文（4月SAP切替対応・2026-04-24まで）
-    from nouki_kaitou.utils import get_special_notice_email
-    special_notice = get_special_notice_email(today)
-    if special_notice:
-        parts.append(_build_special_notice(special_notice))
+    # TWF展示会注記（期間限定。twf.py参照）
+    if twf_notice:
+        parts.append(_build_twf_notice(twf_notice))
 
     # 送り状情報セクション
     if has_tracking:
@@ -222,6 +222,11 @@ def create_emails(
         file_path = file_info.get("file_path", "")
         rep_name = file_info.get("rep_name", "")
 
+        # 添付ファイル: attachmentsリスト指定があれば優先（通常+TWFの複数添付）
+        attachments = file_info.get("attachments")
+        if attachments is None:
+            attachments = [file_path] if file_path else []
+
         # メールアドレス取得
         if rep_name and rep_master_ws is not None:
             mail_addresses = get_rep_email_addresses(
@@ -251,13 +256,14 @@ def create_emails(
             holidays=holidays,
             cache=cache,
             today=today,
+            twf_notice=file_info.get("twf_notice"),
         )
 
         results.append({
             "to": mail_addresses,
             "subject": subject,
             "html_body": body,
-            "attachments": [file_path] if file_path else [],
+            "attachments": attachments,
             "shared_email": branch.shared_email,
             "send_directly": send_directly,
             "customer_name": customer_name,
@@ -299,8 +305,8 @@ def _build_greeting(customer_name: str, branch: BranchSettings) -> str:
     )
 
 
-def _build_special_notice(notice_text: str) -> str:
-    """特別注意文セクション（4月SAP切替対応・期間終了後この関数と呼出を削除）"""
+def _build_twf_notice(notice_text: str) -> str:
+    """TWF展示会注記セクション（期間限定。twf.py参照。期間終了後この関数と呼出を削除）"""
     h = html_escape
     return (
         "<div style='margin: 10px 0 20px 0; padding: 12px; "

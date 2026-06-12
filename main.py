@@ -53,6 +53,11 @@ from nouki_kaitou.report_generator import (
     create_delivery_report,
     create_delivery_report_by_order_numbers,
 )
+from nouki_kaitou.twf import (
+    collect_twf_orders,
+    is_twf_active,
+    merge_email_input,
+)
 from nouki_kaitou.utils import get_output_folder, is_file_open
 
 
@@ -153,17 +158,8 @@ def get_unique_customers(orders: list[OrderRow]) -> list[str]:
     return result
 
 
-def result_to_email_input(result: ReportResult) -> dict:
-    """ReportResultをcreate_emails用のdict形式に変換する。"""
-    return {
-        "customer_name": result.customer_name,
-        "file_path": result.file_path,
-        "stockout_info_list": result.stockout_info_list,
-        "tracking_info_list": result.tracking_info_list,
-        "bunno_info_list": result.bunno_info_list,
-        "rep_name": result.rep_name,
-        "bunno_completed_list": result.bunno_completed_list,
-    }
+# ReportResult → create_emails用dictへの変換は twf.merge_email_input に統合
+# （通常回答書のみ / 通常+TWF専用回答書の両対応）
 
 
 def _load_sent_orders_cached(
@@ -630,6 +626,19 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         else:
             print(f"伝票番号指定モード: {len(order_numbers_mode)}件")
 
+        # --- 6.5. TWF展示会受注の検出（期間限定。twf.py参照） ---
+        twf_order_numbers: set[str] = set()
+        if not order_numbers_mode and is_twf_active(execution_time.date()):
+            twf_order_numbers, twf_detected = collect_twf_orders(orders)
+            if twf_detected:
+                print()
+                print(f"展示会（TWF）受注を検出: "
+                      f"{len(twf_order_numbers)}注番 / {len(twf_detected)}明細")
+                print("  検知したコメント（明細）一覧（目視確認用）:")
+                for onum, dnum, cmt in twf_detected:
+                    print(f"    {onum}|{dnum}: {cmt}")
+                print()
+
         # --- 7. 顧客別事前グルーピング ---
         orders_by_customer: dict[str, list[OrderRow]] = {}
         for order in orders:
@@ -706,6 +715,9 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
 
         # --- 9. 回答書生成ループ ---
         all_results: list[ReportResult] = []
+        # メール統合用: (通常回答書, TWF専用回答書) のペア。どちらかはNoneあり
+        result_pairs: list[tuple[ReportResult | None, ReportResult | None]] = []
+        twf_report_count = 0
         gen_start = time.perf_counter()
 
         for cust in customer_names:
@@ -717,7 +729,14 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
             else:
                 rep_names_to_process = [""]  # 分割なし
 
+            # この顧客にTWF展示会受注があるか
+            cust_has_twf = bool(twf_order_numbers) and any(
+                o.order_number.strip() in twf_order_numbers
+                for o in orders_by_customer.get(cust, [])
+            )
+
             for rep_name in rep_names_to_process:
+                twf_result: ReportResult | None = None
                 if order_numbers_mode:
                     # 伝票番号指定モード
                     result = create_delivery_report_by_order_numbers(
@@ -733,7 +752,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
                         rep_master_ws=rep_master_ws,
                     )
                 else:
-                    # 期間指定モード
+                    # 期間指定モード（TWF注番は通常回答書から除外）
                     result = create_delivery_report(
                         source_data=orders_by_customer.get(cust, []),
                         customer_name=cust,
@@ -747,15 +766,48 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
                         date_to=date_to,
                         rep_name=rep_name,
                         rep_master_ws=rep_master_ws,
+                        exclude_orders=twf_order_numbers or None,
                     )
+
+                    # TWF専用回答書（履歴・期間フィルタなしで毎回全件表示）
+                    if cust_has_twf:
+                        twf_result = create_delivery_report(
+                            source_data=orders_by_customer.get(cust, []),
+                            customer_name=cust,
+                            sent_orders=sent_orders,
+                            cache=cache,
+                            output_dir=output_dir,
+                            holidays=holidays,
+                            branch=branch,
+                            execution_time=execution_time,
+                            date_from=None,
+                            date_to=None,
+                            rep_name=rep_name,
+                            rep_master_ws=rep_master_ws,
+                            include_only_orders=twf_order_numbers,
+                            filter_already_sent=False,
+                            twf_mode=True,
+                        )
 
                 if result:
                     all_results.append(result)
+                if twf_result:
+                    all_results.append(twf_result)
+                    twf_report_count += 1
+
+                if result or twf_result:
+                    result_pairs.append((result, twf_result))
+
+                if result:
                     confirmed_count = len(result.confirmed_orders)
                     confirming_count = len(result.confirming_orders)
                     print(f"  生成: {result.file_path}")
                     print(f"    確定: {confirmed_count}件 / 確認中: {confirming_count}件")
-                elif rep_name == "" or rep_name == rep_names_to_process[0]:
+                if twf_result:
+                    print(f"  生成(展示会): {twf_result.file_path}")
+                if not result and not twf_result and (
+                    rep_name == "" or rep_name == rep_names_to_process[0]
+                ):
                     # 分割なし or 最初の担当者のみスキップ表示（__OTHER__等は静かにスキップ）
                     print(f"  スキップ: {cust}（対象データなし）")
 
@@ -808,7 +860,10 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
                 create_outlook_sends,
             )
 
-            created_files = [result_to_email_input(r) for r in all_results]
+            # 通常+TWFのペアを1メール（複数添付）に統合
+            created_files = [
+                merge_email_input(normal, twf) for normal, twf in result_pairs
+            ]
             cust_ws = cust_wb["顧客マスター"]
             emails, skipped_email_customers = create_emails(
                 created_files=created_files,
@@ -851,6 +906,9 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
         print(f"  確認中:    {confirming_total}件")
         print(f"  スキップ:  {skipped_order_count}件")
         print(f"  合計:      {total}件")
+        if twf_report_count:
+            print(f"  展示会回答書: {twf_report_count}件"
+                  f"（対象 {len(twf_order_numbers)}注番）")
         print("=" * 40)
         print()
         print("完了しました。")

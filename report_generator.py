@@ -52,6 +52,13 @@ from nouki_kaitou.representative import (
 )
 from nouki_kaitou.stockout import extract_approx_delivery, remove_stockout_text
 from nouki_kaitou.tracking import clean_external_comment, extract_tracking_info
+from nouki_kaitou.twf import (
+    TWF_FILENAME_TAG,
+    TWF_NOTICE_EXCEL,
+    TWF_REPORT_TITLE,
+    TWF_SHEET_PREFIX,
+    remove_twf_text,
+)
 from nouki_kaitou.utils import (
     build_report_filename,
     build_sheet_name,
@@ -190,6 +197,7 @@ def build_report_row(
     # --- 備考テキストクリーニング ---
     remark = remove_stockout_text(row.comment_detail)
     remark = remove_bunno_text(remark)
+    remark = remove_twf_text(remark)
     remark = remark.strip()
 
     report_row = ReportRow(
@@ -356,6 +364,10 @@ def create_delivery_report(
     rep_name: str = "",
     rep_master_ws: object = None,
     today: datetime.date | None = None,
+    exclude_orders: set[str] | None = None,
+    include_only_orders: set[str] | None = None,
+    filter_already_sent: bool = True,
+    twf_mode: bool = False,
 ) -> ReportResult | None:
     """期間指定モードで納期回答書を作成する。
 
@@ -375,6 +387,15 @@ def create_delivery_report(
         rep_name: 担当者名
         rep_master_ws: 担当者マスターシート
         today: 基準日（テスト用）
+        exclude_orders: 除外する注番セット（通常回答書からTWF注番を除く用）
+        include_only_orders: この注番セットのみ対象とする（TWF専用回答書用）。
+            Noneなら全注番が対象
+        filter_already_sent: Falseなら送付済みチェックをスキップして
+            毎回表示する（除外マーカー・除外ステータスは常に有効）。
+            履歴への記録判定（分類）は通常どおり行う
+        twf_mode: TWF展示会専用回答書モード。タイトル・ファイル名・
+            シート名・注記をTWF用に切り替え、処理完了+回答済みの伝票を
+            「納品済み」表示に上書きする
 
     Returns:
         ReportResult（データなしならNone）
@@ -389,8 +410,10 @@ def create_delivery_report(
     # ワークブック作成
     wb = Workbook()
     ws = wb.active
-    ws.title = build_sheet_name(customer_name, rep_name)
-    create_header(ws, customer_name, rep_name, today, branch)
+    sheet_prefix = TWF_SHEET_PREFIX if twf_mode else ""
+    report_title = TWF_REPORT_TITLE if twf_mode else None
+    ws.title = build_sheet_name(customer_name, rep_name, prefix=sheet_prefix)
+    create_header(ws, customer_name, rep_name, today, branch, title=report_title)
 
     current_row = 7
     is_external_mode = branch is not None and branch.remarks_mode == "external"
@@ -411,6 +434,13 @@ def create_delivery_report(
     for row in source_data:
         # --- 顧客名フィルタ ---
         if row.customer_name.strip() != customer_name:
+            continue
+
+        # --- TWF注番フィルタ（通常回答書: 除外 / TWF回答書: 限定） ---
+        order_num = row.order_number.strip()
+        if exclude_orders and order_num in exclude_orders:
+            continue
+        if include_only_orders is not None and order_num not in include_only_orders:
             continue
 
         # --- 担当者フィルタ ---
@@ -435,14 +465,15 @@ def create_delivery_report(
         is_already_sent = False
         previous_status = sent_orders.get(history_key, "")
 
-        # 除外判定（送付履歴 or 確認中一覧）
+        # 除外判定（送付履歴 or 確認中一覧）。
+        # filter_already_sent=False（TWF回答書）でも除外は常に有効
         is_excluded = _is_excluded(
             row, previous_status, cache
         )
-
         if is_excluded:
-            is_already_sent = True
-        elif previous_status == "分納完了":
+            continue
+
+        if previous_status == "分納完了":
             is_already_sent = True
         elif row.ship_status == "処理完了" and previous_status == "確認中":
             is_already_sent = False  # 処理完了で確認中→今回出す
@@ -451,7 +482,7 @@ def create_delivery_report(
         elif previous_status and row.registration_date < today:
             is_already_sent = True
 
-        if is_already_sent:
+        if is_already_sent and filter_already_sent:
             continue
 
         # --- forceDelivered / isHimozuki / isBunnoCompleted ---
@@ -474,6 +505,16 @@ def create_delivery_report(
 
         # 分納完了 → 納品済み上書き
         if is_bunno_completed:
+            delivery_status = "納品済み"
+            report_row.delivery_answer = "納品済み"
+
+        # TWFモード: 処理完了かつ回答済み（履歴に確定記録あり）の伝票は
+        # 「納品済み」表示に上書きする。
+        # 履歴チェックを表示でスキップするため、force_delivered の既存判定
+        # （履歴が空 or 確認中のときのみ発火）を通らないケースの補完
+        if (twf_mode
+                and row.ship_status == "処理完了"
+                and previous_status not in ("", "確認中")):
             delivery_status = "納品済み"
             report_row.delivery_answer = "納品済み"
 
@@ -530,10 +571,14 @@ def create_delivery_report(
         tracking_info_list, stockout_info_list,
         bunno_info_list, bunno_completed_list,
         holidays, cache, today,
+        twf_notice=TWF_NOTICE_EXCEL if twf_mode else None,
     )
 
     # 保存
-    filename = build_report_filename(customer_name, execution_time, rep_name)
+    filename = build_report_filename(
+        customer_name, execution_time, rep_name,
+        filename_tag=TWF_FILENAME_TAG if twf_mode else "",
+    )
     file_path = str(Path(output_dir) / filename)
     wb.save(file_path)
 
@@ -548,6 +593,7 @@ def create_delivery_report(
         bunno_info_list=bunno_info_list,
         bunno_completed_list=bunno_completed_list,
         has_confirming=len(confirming_orders) > 0,
+        is_twf=twf_mode,
     )
 
 
