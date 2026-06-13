@@ -110,6 +110,24 @@ def format_twf_no(number: str) -> str:
     return s
 
 
+def parse_quantity(value: str) -> int | float | str | None:
+    """数量を数値型に変換する（Excelの「文字列保存」エラーマーク対策）。
+
+    - 「10」→ int 10、「1.00」「800.00」→ 整数値なら int、「1.5」→ float
+    - 桁区切りカンマ（「1,000」）は除去して数値化
+    - 空欄 → None（セルは空欄）
+    - 非数値（「未定」等）→ そのまま文字列で返す（落とさない）
+    """
+    s = str(value).strip().replace(",", "")
+    if not s:
+        return None
+    try:
+        f = float(s)
+    except ValueError:
+        return str(value).strip()  # 非数値は文字列のまま
+    return int(f) if f.is_integer() else f
+
+
 def resolve_manufacturer(
     row: OrderRow, mfg_name: dict[str, str] | None
 ) -> str:
@@ -364,7 +382,13 @@ def write_ledger(rows: list[LedgerRow], out_path: str | Path) -> Path:
         r = DATA_START_ROW + ridx
         for i, (attr, _, _) in enumerate(COLUMNS):
             c = TABLE_START_COL + i
-            cell = ws.cell(r, c, getattr(row, attr))
+            # 数量は数値型で書き込む（文字列保存のエラーマーク対策）
+            value = (
+                parse_quantity(row.quantity)
+                if attr == "quantity"
+                else getattr(row, attr)
+            )
+            cell = ws.cell(r, c, value)
             cell.border = _BORDER
             cell.alignment = Alignment(
                 vertical="center",

@@ -17,6 +17,7 @@ from nouki_kaitou.twf_ledger import (
     build_ledger_rows,
     classify_tehai,
     format_twf_no,
+    parse_quantity,
     read_existing_status,
     resolve_manufacturer,
     write_ledger,
@@ -222,6 +223,66 @@ def test_carryover_round_trip(tmp_path):
 
 def test_read_existing_missing_file_returns_empty(tmp_path):
     assert read_existing_status(tmp_path / "nope.xlsx") == {}
+
+
+# ============================================
+# 数量の数値化（Excelの文字列保存エラーマーク対策）
+# ============================================
+def test_parse_quantity_integer():
+    assert parse_quantity("10") == 10
+    assert isinstance(parse_quantity("10"), int)
+
+
+def test_parse_quantity_whole_decimal_becomes_int():
+    assert parse_quantity("1.00") == 1
+    assert isinstance(parse_quantity("1.00"), int)
+    assert parse_quantity("800.00") == 800
+    assert isinstance(parse_quantity("800.00"), int)
+
+
+def test_parse_quantity_real_decimal():
+    assert parse_quantity("1.5") == 1.5
+    assert isinstance(parse_quantity("1.5"), float)
+
+
+def test_parse_quantity_comma_thousands():
+    assert parse_quantity("1,000") == 1000
+
+
+def test_parse_quantity_blank_is_none():
+    assert parse_quantity("") is None
+    assert parse_quantity("   ") is None
+
+
+def test_parse_quantity_non_numeric_stays_string():
+    assert parse_quantity("未定") == "未定"
+
+
+def test_write_quantity_is_numeric_cell(tmp_path):
+    """数量セルが数値型で書き込まれ、非数値・空でも落ちない。"""
+    orders = [
+        _order(order_number="GLN1", quantity="1.00",
+               comment_detail="TWFNo.001　甲社様"),
+        _order(order_number="GLN2", quantity="10",
+               comment_detail="TWFNo.002　乙社様"),
+        _order(order_number="GLN3", quantity="",
+               comment_detail="TWFNo.003　丙社様"),
+        _order(order_number="GLN4", quantity="未定",
+               comment_detail="TWFNo.004　丁社様"),
+    ]
+    rows = build_ledger_rows(orders)
+    out = write_ledger(rows, tmp_path / "qty.xlsx")
+    wb = load_workbook(out)
+    ws = wb.active
+    hdr = {ws.cell(8, c).value: c for c in range(2, 13)}
+    qcol = hdr["数量"]
+    # 行はTWF No.順（001..004）
+    vals = {ws.cell(r, hdr["注番"]).value: ws.cell(r, qcol).value
+            for r in range(9, ws.max_row + 1)}
+    assert vals["GLN1"] == 1 and isinstance(vals["GLN1"], int)
+    assert vals["GLN2"] == 10 and isinstance(vals["GLN2"], int)
+    assert vals["GLN3"] is None          # 空欄
+    assert vals["GLN4"] == "未定"        # 非数値は文字列
 
 
 # ============================================
