@@ -124,7 +124,10 @@ class TwfDetailInfo:
     memo: str = ""      # 備考メモ（お持ち帰り・サービス品・着日等）
 
 
-_TWF_NUM_RE = re.compile(r"^([0-9０-９]+|不明)")
+# 番号は「数字で始まり、以降は数字か？（全半角）の連続」を1つの番号として取る。
+# FAXで読めない桁を担当者が？で埋めて桁数（6桁）を保つ運用に対応
+# （例: 「0014？？」＝頭4桁は読めたが残り2桁不明）。？はお客様名ではなく番号の一部。
+_TWF_NUM_RE = re.compile(r"^([0-9０-９][0-9０-９？?]*|不明)")
 
 
 def _split_customer_memo(tail: str) -> tuple[str, str]:
@@ -215,11 +218,14 @@ def twf_sort_key(
     """TWF専用回答書の行ソートキー。
 
     TWF No.昇順 → 同一No.内は注番→明細順。番号なし・「不明」は末尾。
+    ？を含む番号（例「0014？？」）は ？を0とみなして数値化し、読めている桁の
+    位置に並べる（「0014？？」→001400相当）。純粋な数字の順序は不変。
     """
     detail_str = str(detail_number).strip()
     detail = int(detail_str) if detail_str.isdigit() else 0
-    if number.isdigit():
-        return (0, int(number), order_number.strip(), detail)
+    core = number.replace("？", "0").replace("?", "0")
+    if core.isdigit():
+        return (0, int(core), order_number.strip(), detail)
     return (1, 0, order_number.strip(), detail)
 
 

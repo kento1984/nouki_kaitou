@@ -81,6 +81,7 @@ _COLUMN_MAPPINGS: list[tuple[str, str, bool]] = [
     ("コメント（社内）", "コメント（社内）", False),
     ("コメント（社外）", "コメント（社外）", False),
     ("伝票タイプ", "伝票タイプ", False),
+    ("マツモト担当者名", "マツモト担当者名", False),  # 社内手配担当（TWF台帳用）
     ("時刻", "時刻", False),
     ("登録日", "登録日", False),
     ("拒否理由", "拒否理由", False),
@@ -197,6 +198,7 @@ def parse_order_row(
         order_delivery_date=parse_date(get_val("受注納期")),
         specified_delivery_date=parse_date(get_val("指定納期")),
         item_group_code=get_val("品目Group"),
+        rep_name=get_val("マツモト担当者名"),
         source_row=row_idx,
     )
 

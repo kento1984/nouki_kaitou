@@ -150,6 +150,7 @@ class OrderRow:
     order_delivery_date: Optional[datetime.date] = None  # 受注納期
     specified_delivery_date: Optional[datetime.date] = None  # 指定納期
     item_group_code: str = ""           # 品目 Group
+    rep_name: str = ""                  # マツモト担当者名（社内手配担当。例: "柏原　賢人"）
     source_row: int = 0                 # 元データの行番号（デバッグ用）
 
 

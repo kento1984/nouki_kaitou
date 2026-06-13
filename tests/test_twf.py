@@ -284,6 +284,17 @@ class TestParseTwfComment:
         info = parse_twf_comment("TWFNo.")
         assert info == TwfDetailInfo(number="", customer="", memo="")
 
+    def test_number_with_question_marks(self):
+        """？はTWF№の欠損桁プレースホルダ。番号側に入れ、お客様名には入れない。"""
+        info = parse_twf_comment("TWFNo.0014？？　㈱ハイプラン様")
+        assert info == TwfDetailInfo(number="0014??", customer="㈱ハイプラン様", memo="")
+
+    def test_number_with_question_marks_no_space(self):
+        info = parse_twf_comment("TWFNo.002？？？　(有)萩原溶接工業様")
+        assert info == TwfDetailInfo(
+            number="002???", customer="(有)萩原溶接工業様", memo=""
+        )
+
     def test_no_twf_returns_none(self):
         assert parse_twf_comment("欠品中 3月上旬入荷予定") is None
 
@@ -394,6 +405,25 @@ class TestTwfSortKey:
         ]
         ordered = sorted(rows, key=lambda r: twf_sort_key(*r))
         assert [(r[1], r[2]) for r in ordered] == [("100", "10"), ("100", "20"), ("200", "10")]
+
+    def test_question_mark_sorts_by_known_digits(self):
+        """？は0扱いで読めている桁の位置に並ぶ（末尾送りにしない）。
+
+        「002？？？」→002000相当なので、000022の後・005409の前。
+        """
+        rows = [
+            ("005409", "300", "10"),
+            ("002???", "200", "10"),
+            ("000022", "100", "10"),
+        ]
+        ordered = sorted(rows, key=lambda r: twf_sort_key(*r))
+        assert [r[0] for r in ordered] == ["000022", "002???", "005409"]
+
+    def test_question_mark_not_treated_as_unknown(self):
+        """？付き番号は「不明」より前（部分的に番号が読めているため）。"""
+        rows = [("不明", "200", "10"), ("0014??", "100", "10")]
+        ordered = sorted(rows, key=lambda r: twf_sort_key(*r))
+        assert [r[0] for r in ordered] == ["0014??", "不明"]
 
 
 # ============================================
