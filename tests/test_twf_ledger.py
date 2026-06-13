@@ -153,7 +153,7 @@ def test_build_question_mark_number_goes_to_number_column():
                comment_detail="TWFNo.0014？？　㈱ハイプラン様"),
     ]
     rows = build_ledger_rows(orders)
-    assert rows[0].twf_no == "0014??"
+    assert rows[0].twf_no == "0014？？"   # 数字は半角・？は全角保持
     assert rows[0].customer == "㈱ハイプラン様"
 
 
@@ -171,8 +171,8 @@ def test_format_twf_no_keeps_six_or_more():
 
 
 def test_format_twf_no_skips_question_unknown_blank():
-    assert format_twf_no("0014??") == "0014??"   # ？含みは埋めない
-    assert format_twf_no("002???") == "002???"
+    assert format_twf_no("0014？？") == "0014？？"   # 全角？含みは埋めない
+    assert format_twf_no("002？？？") == "002？？？"
     assert format_twf_no("不明") == "不明"
     assert format_twf_no("") == ""
 

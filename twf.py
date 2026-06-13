@@ -130,6 +130,21 @@ class TwfDetailInfo:
 _TWF_NUM_RE = re.compile(r"^([0-9０-９][0-9０-９？?]*|不明)")
 
 
+def _normalize_twf_number(raw: str) -> str:
+    """番号の数字部分だけ半角化し、？（欠損桁プレースホルダ）は全角のまま残す。
+
+    NFKCを番号全体にかけると全角？→半角?まで変換されてしまい視認しづらい。
+    数字は半角・？は全角「？」に統一する（例「００１４？？」→「0014？？」）。
+    """
+    out = []
+    for ch in raw:
+        if ch in ("？", "?"):
+            out.append("？")  # ？は全角で統一
+        else:
+            out.append(unicodedata.normalize("NFKC", ch))  # 全角数字→半角
+    return "".join(out)
+
+
 def _split_customer_memo(tail: str) -> tuple[str, str]:
     """後続テキストをお客様名と備考メモに振り分ける。
 
@@ -157,7 +172,7 @@ def parse_twf_comment(comment: str) -> TwfDetailInfo | None:
     body = re.sub(r"[ \t　]+", " ", m.group(1)).strip()
     nm = _TWF_NUM_RE.match(body)
     if nm:
-        number = unicodedata.normalize("NFKC", nm.group(1))  # 全角数字→半角
+        number = _normalize_twf_number(nm.group(1))  # 数字は半角化、？は全角保持
         tail = body[nm.end():].strip()
     else:
         number = ""
