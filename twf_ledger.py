@@ -160,30 +160,34 @@ class LedgerRow:
     twf_no: str = ""        # TWF No.（番号のみ。「不明」もあり得る）
     order_number: str = ""  # 注番
     detail_number: str = "" # 明細
-    rep_name: str = ""      # 担当者（マツモト担当者名）
-    customer: str = ""      # お客様名（コメント由来のエンドユーザー名）
+    ship_dealer: str = ""   # 受注先（販売店＝SAP取引先。customer_name由来）
+    customer: str = ""      # ユーザー名（コメント由来のエンドユーザー名）
     manufacturer: str = ""  # メーカー名
     product: str = ""       # 品名
     quantity: str = ""      # 数量
     tehai: str = ""         # 手配区分（直送/紐付き/在庫販売）
     status: str = STATUS_DEFAULT  # ステータス（手入力・引き継ぎ対象）
     note: str = ""          # 備考（手入力・引き継ぎ対象）
+    rep_name: str = ""      # 担当者（マツモト担当者名。スライサー絞り込み用・最右端）
 
 
 # 台帳の列定義（表示順・ヘッダー・幅）
 # (属性名, ヘッダー, 幅)
+# 受注先（販売店）を注番の近くに追加、ユーザー名と並べて役割を区別。
+# 担当者はスライサーで絞る前提のためほぼ見ない情報として最右端に配置。
 COLUMNS: list[tuple[str, str, int]] = [
     ("twf_no", "TWF No.", 9),
     ("order_number", "注番", 13),
     ("detail_number", "明細", 6),
-    ("rep_name", "担当者", 12),
-    ("customer", "お客様名", 26),
+    ("ship_dealer", "受注先（販売店）", 28),
+    ("customer", "ユーザー名", 24),
     ("manufacturer", "メーカー名", 22),
     ("product", "品名", 32),
     ("quantity", "数量", 8),
     ("tehai", "手配区分", 10),
     ("status", "ステータス", 14),
     ("note", "備考", 26),
+    ("rep_name", "担当者", 12),
 ]
 
 
@@ -221,12 +225,13 @@ def build_ledger_rows(
                 twf_no=twf_no,
                 order_number=onum,
                 detail_number=o.detail_number.strip(),
-                rep_name=o.rep_name.strip(),
+                ship_dealer=o.customer_name.strip(),
                 customer=customer,
                 manufacturer=resolve_manufacturer(o, mfg_name),
                 product=o.product_name.strip(),
                 quantity=o.quantity.strip(),
                 tehai=classify_tehai(o),
+                rep_name=o.rep_name.strip(),
             )
         )
 
@@ -392,7 +397,8 @@ def write_ledger(rows: list[LedgerRow], out_path: str | Path) -> Path:
             cell.border = _BORDER
             cell.alignment = Alignment(
                 vertical="center",
-                wrap_text=(attr in ("customer", "manufacturer", "product", "note")),
+                wrap_text=(attr in ("ship_dealer", "customer", "manufacturer",
+                                    "product", "note")),
             )
 
     last_data_row = DATA_START_ROW + len(rows) - 1

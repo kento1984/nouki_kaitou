@@ -31,6 +31,7 @@ def _order(
     storage_place="転送中（直送用）",
     comment_detail="TWFNo.003243　新成（株）様",
     rep_name="柏原　賢人",
+    customer_name="京葉帝酸（株）",
     manufacturer_name="ベルテクノ（株）",
     product_name="溶接機",
     quantity="2",
@@ -43,6 +44,7 @@ def _order(
         storage_place=storage_place,
         comment_detail=comment_detail,
         rep_name=rep_name,
+        customer_name=customer_name,
         manufacturer_name=manufacturer_name,
         product_name=product_name,
         quantity=quantity,
@@ -311,6 +313,31 @@ def test_write_creates_table_and_dropdown(tmp_path):
     assert ws["A8"].value is None  # 左余白
     # ヘッダー固定
     assert ws.freeze_panes == "A9"
+
+
+def test_column_layout_dealer_user_rep(tmp_path):
+    """受注先（販売店）追加・ユーザー名・担当者は最右端の列構成。"""
+    orders = [
+        _order(order_number="GLD1", customer_name="京葉帝酸（株）",
+               rep_name="首藤　佑哉",
+               comment_detail="TWFNo.001　藤原溶接様"),
+    ]
+    rows = build_ledger_rows(orders)
+    out = write_ledger(rows, tmp_path / "layout.xlsx")
+    wb = load_workbook(out)
+    ws = wb.active
+    headers = [ws.cell(8, c).value for c in range(2, 14)]
+    assert headers == [
+        "TWF No.", "注番", "明細", "受注先（販売店）", "ユーザー名",
+        "メーカー名", "品名", "数量", "手配区分", "ステータス", "備考", "担当者",
+    ]
+    hdr = {ws.cell(8, c).value: c for c in range(2, 14)}
+    # 受注先＝販売店、ユーザー名＝エンドユーザーが別列に入る
+    assert ws.cell(9, hdr["受注先（販売店）"]).value == "京葉帝酸（株）"
+    assert ws.cell(9, hdr["ユーザー名"]).value == "藤原溶接様"
+    # 担当者は最右端（備考の後）
+    assert hdr["担当者"] > hdr["備考"]
+    assert ws.cell(9, hdr["担当者"]).value == "首藤　佑哉"
 
 
 def test_status_choices_count():
