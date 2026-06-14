@@ -68,6 +68,7 @@ _COLUMN_MAPPINGS: list[tuple[str, str, bool]] = [
     ("受注数量", "受注数量", False),
     ("受注単価", "受注単価", False),
     ("正味額", "正味額", False),
+    ("発注単価", "発注単価", False),     # 仕入単価（手配台帳の金額列用）
     ("メーカー", "名称", False),     # 内部名は「メーカー」、ヘッダーは「名称」
     ("保管場所", "保管場所", False),
     ("出荷先名", "出荷先名", False),
@@ -184,6 +185,7 @@ def parse_order_row(
         quantity=get_val("受注数量"),
         unit_price=get_val("受注単価"),
         net_amount=get_val("正味額"),
+        purchase_unit_price=get_val("発注単価"),
         manufacturer_name=get_val("メーカー"),
         storage_place=get_val("保管場所"),
         customer_order_number=get_val("得意先発注番号"),

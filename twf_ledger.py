@@ -174,6 +174,10 @@ class LedgerRow:
     quantity: str = ""      # 数量
     tehai: str = ""         # 手配区分（直送/紐付き/在庫販売）
     delivery_answer: str = ""  # 回答納期（納期回答書と同じ算出。delivery_ctx指定時のみ）
+    # 金額（手配台帳用）。仮単価1円・0・空は「未確定」＝None で持つ（変な総額を出さない）。
+    sell_unit_price: float | None = None      # 売単価（受注単価。確定時のみ）
+    purchase_unit_price: float | None = None  # 仕入単価（発注単価。確定時のみ）
+    sales_total: int | None = None            # 売上総額（正味額＝売価合計。未確定はNone）
     status: str = STATUS_DEFAULT  # ステータス（手入力・引き継ぎ対象）
     note: str = ""          # 備考（手入力・引き継ぎ対象）
     rep_name: str = ""      # 担当者（マツモト担当者名。スライサー絞り込み用・最右端）
@@ -197,6 +201,40 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("note", "備考", 26),
     ("rep_name", "担当者", 12),
 ]
+
+
+# ============================================
+# 金額の解決（手配台帳用）
+# ============================================
+def _parse_amount(raw: object) -> float | None:
+    """SAPの金額文字列（"830.000", "12,450", '"44,000"'）を数値化。空・非数値はNone。"""
+    s = str(raw or "").replace(",", "").strip().strip('"')
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _resolve_ledger_prices(o: "OrderRow") -> tuple[float | None, int | None, float | None]:
+    """手配台帳用に (売単価, 売上総額, 仕入単価) を解決する。
+
+    納期回答書（report_generator._resolve_price）と同じ思想:
+    - 売単価=1円（仮単価）→ 未確定（None）。ただしコメント（社内）に「$$」が
+      あれば確定扱いでそのまま出す。
+    - 仕入単価（発注単価）も 1円/0/空 は未確定（None）。
+    1円×数量のような無意味な総額を画面・Excelに出さないための措置。
+    """
+    confirmed = "$$" in o.comment_internal or "＄＄" in o.comment_internal
+    sell = _parse_amount(o.unit_price)
+    net = _parse_amount(o.net_amount)
+    sell_ok = confirmed or (sell is not None and sell > 1)
+    sell_price = sell if sell_ok else None
+    sales_total = int(round(net)) if (sell_ok and net is not None) else None
+    buy = _parse_amount(o.purchase_unit_price)
+    buy_price = buy if (buy is not None and buy > 1) else None
+    return sell_price, sales_total, buy_price
 
 
 # ============================================
@@ -266,6 +304,7 @@ def build_ledger_rows(
                         f"{onum}|{o.detail_number.strip()}:{type(e).__name__}"
                     )
 
+        sell_price, sales_total, buy_price = _resolve_ledger_prices(o)
         rows.append(
             LedgerRow(
                 twf_no=twf_no,
@@ -278,6 +317,9 @@ def build_ledger_rows(
                 quantity=o.quantity.strip(),
                 tehai=classify_tehai(o),
                 delivery_answer=delivery_answer,
+                sell_unit_price=sell_price,
+                purchase_unit_price=buy_price,
+                sales_total=sales_total,
                 rep_name=o.rep_name.strip(),
             )
         )

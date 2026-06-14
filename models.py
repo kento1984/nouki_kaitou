@@ -134,8 +134,9 @@ class OrderRow:
     product_name: str = ""              # テキスト（品名）
     ship_status: str = ""               # 出荷ステータス（未処理/一部処理済み/処理完了）
     quantity: str = ""                  # 受注数量
-    unit_price: str = ""                # 受注単価
-    net_amount: str = ""                # 正味額
+    unit_price: str = ""                # 受注単価（売単価）
+    net_amount: str = ""                # 正味額（売上総額＝売価合計）
+    purchase_unit_price: str = ""       # 発注単価（仕入単価）
     manufacturer_name: str = ""         # 名称（メーカー）
     storage_place: str = ""             # 保管場所
     customer_order_number: str = ""     # 得意先発注番号
