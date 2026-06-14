@@ -174,10 +174,12 @@ class LedgerRow:
     quantity: str = ""      # 数量
     tehai: str = ""         # 手配区分（直送/紐付き/在庫販売）
     delivery_answer: str = ""  # 回答納期（納期回答書と同じ算出。delivery_ctx指定時のみ）
-    # 金額（手配台帳用）。仮単価1円・0・空は「未確定」＝None で持つ（変な総額を出さない）。
-    sell_unit_price: float | None = None      # 売単価（受注単価。確定時のみ）
-    purchase_unit_price: float | None = None  # 仕入単価（発注単価。確定時のみ）
-    sales_total: int | None = None            # 売上総額（正味額＝売価合計。未確定はNone）
+    # 金額（手配台帳用）。社内台帳なのでTXTの素の値をそのまま持つ（仮単価1円もそのまま）。
+    # 空・非数値のみ None。price_confirmed は売上合計を確定分だけにするための判定。
+    sell_unit_price: float | None = None      # 売単価（受注単価。素の値）
+    purchase_unit_price: float | None = None  # 仕入単価（発注単価。素の値）
+    sales_total: int | None = None            # 売上総額（正味額＝売価合計。素の値）
+    price_confirmed: bool = False             # 売単価が確定か（仮単価1円/0/空=False）
     status: str = STATUS_DEFAULT  # ステータス（手入力・引き継ぎ対象）
     note: str = ""          # 備考（手入力・引き継ぎ対象）
     rep_name: str = ""      # 担当者（マツモト担当者名。スライサー絞り込み用・最右端）
@@ -217,24 +219,27 @@ def _parse_amount(raw: object) -> float | None:
         return None
 
 
-def _resolve_ledger_prices(o: "OrderRow") -> tuple[float | None, int | None, float | None]:
-    """手配台帳用に (売単価, 売上総額, 仕入単価) を解決する。
+def _resolve_ledger_prices(
+    o: "OrderRow",
+) -> tuple[float | None, float | None, int | None, bool]:
+    """手配台帳用に (売単価, 仕入単価, 売上総額, 売単価が確定か) を返す。
 
-    納期回答書（report_generator._resolve_price）と同じ思想:
-    - 売単価=1円（仮単価）→ 未確定（None）。ただしコメント（社内）に「$$」が
-      あれば確定扱いでそのまま出す。
-    - 仕入単価（発注単価）も 1円/0/空 は未確定（None）。
-    1円×数量のような無意味な総額を画面・Excelに出さないための措置。
+    社内台帳なので金額は **TXTの素の値をそのまま** 持つ（仮単価1円もそのまま。
+    「1円＝単価登録待ち」が一目で分かる方が現場は助かるため）。空・非数値のみ None。
+
+    price_confirmed は「売単価が確定しているか」。納期回答書
+    （report_generator._resolve_price）と同じ思想で、仮単価1円/0/空は未確定とする。
+    ただしコメント（社内）に「$$」があれば確定扱い。
+    グループ見出しの売上合計を「確定分だけ」にするための判定にのみ使う
+    （仮単価1円の総額を混ぜて合計が狂うのを防ぐ。表示する数字は素の値のまま）。
     """
-    confirmed = "$$" in o.comment_internal or "＄＄" in o.comment_internal
+    confirmed_flag = "$$" in o.comment_internal or "＄＄" in o.comment_internal
     sell = _parse_amount(o.unit_price)
-    net = _parse_amount(o.net_amount)
-    sell_ok = confirmed or (sell is not None and sell > 1)
-    sell_price = sell if sell_ok else None
-    sales_total = int(round(net)) if (sell_ok and net is not None) else None
     buy = _parse_amount(o.purchase_unit_price)
-    buy_price = buy if (buy is not None and buy > 1) else None
-    return sell_price, sales_total, buy_price
+    net = _parse_amount(o.net_amount)
+    sales_total = int(round(net)) if net is not None else None
+    price_confirmed = confirmed_flag or (sell is not None and sell > 1)
+    return sell, buy, sales_total, price_confirmed
 
 
 # ============================================
@@ -304,7 +309,7 @@ def build_ledger_rows(
                         f"{onum}|{o.detail_number.strip()}:{type(e).__name__}"
                     )
 
-        sell_price, sales_total, buy_price = _resolve_ledger_prices(o)
+        sell_price, buy_price, sales_total, price_confirmed = _resolve_ledger_prices(o)
         rows.append(
             LedgerRow(
                 twf_no=twf_no,
@@ -320,6 +325,7 @@ def build_ledger_rows(
                 sell_unit_price=sell_price,
                 purchase_unit_price=buy_price,
                 sales_total=sales_total,
+                price_confirmed=price_confirmed,
                 rep_name=o.rep_name.strip(),
             )
         )
