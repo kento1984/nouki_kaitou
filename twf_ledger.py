@@ -42,7 +42,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-from nouki_kaitou.cache import build_manufacturer_cache
+from nouki_kaitou.cache import build_all_caches, build_manufacturer_cache
+from nouki_kaitou.config import load_branch_settings, load_holidays
 from nouki_kaitou.data_loader import (
     get_column_positions,
     get_data_rows_range,
@@ -50,14 +51,16 @@ from nouki_kaitou.data_loader import (
     load_source_file,
     parse_order_row,
 )
+from nouki_kaitou.history import CONFIRMING_SHEET_NAME
 from nouki_kaitou.models import OrderRow
+from nouki_kaitou.report_generator import build_report_row
 from nouki_kaitou.twf import (
     build_twf_info_map,
     collect_twf_orders,
     parse_twf_comment,
     twf_sort_key,
 )
-from nouki_kaitou.utils import normalize_item_group_code
+from nouki_kaitou.utils import is_file_open, normalize_item_group_code
 
 # メーカー名が空（在庫販売）で品目Groupマスターでも引けなかったときの表示。
 # 空欄だとデータ抜けに見えるため、マスター未登録であることを明示する。
@@ -74,6 +77,10 @@ STATUS_CHOICES = [
     "その他",
 ]
 STATUS_DEFAULT = "未着手"
+
+# 回答納期の計算がこの割合以上の明細で失敗したら、設定ミス・マスター不整合・
+# 実装バグの疑いとして取込を中止する（全件空欄を「成功」に見せないため）。
+DELIVERY_FAIL_ABORT_RATIO = 0.5
 
 # ============================================
 # 手配区分の判定（直送 / 紐付き / 在庫販売）
@@ -166,6 +173,7 @@ class LedgerRow:
     product: str = ""       # 品名
     quantity: str = ""      # 数量
     tehai: str = ""         # 手配区分（直送/紐付き/在庫販売）
+    delivery_answer: str = ""  # 回答納期（納期回答書と同じ算出。delivery_ctx指定時のみ）
     status: str = STATUS_DEFAULT  # ステータス（手入力・引き継ぎ対象）
     note: str = ""          # 備考（手入力・引き継ぎ対象）
     rep_name: str = ""      # 担当者（マツモト担当者名。スライサー絞り込み用・最右端）
@@ -195,7 +203,9 @@ COLUMNS: list[tuple[str, str, int]] = [
 # 台帳行の構築
 # ============================================
 def build_ledger_rows(
-    orders: list[OrderRow], mfg_name: dict[str, str] | None = None
+    orders: list[OrderRow],
+    mfg_name: dict[str, str] | None = None,
+    delivery_ctx: tuple | None = None,
 ) -> list[LedgerRow]:
     """全受注からTWF展示会受注を抽出し、台帳行に変換する。
 
@@ -205,9 +215,27 @@ def build_ledger_rows(
     - メーカー名は SAP「名称」優先、空（在庫販売）のときだけ品目Groupマスター
       （mfg_name）で補完。補完不可は「（要確認）」（resolve_manufacturer）。
     - 並び順は twf_sort_key（TWF No.昇順 → 注番→明細順、番号なし・不明は末尾）。
+
+    Args:
+        delivery_ctx: build_delivery_context() の戻り値
+            (CacheStore, holidays, branch)。指定すると各明細に納期回答書と同じ
+            回答納期（delivery_answer）を入れる。None なら回答納期は空のまま。
     """
     twf_orders, _ = collect_twf_orders(orders)
     info_map = build_twf_info_map(orders)
+
+    cache = holidays = branch = None
+    execution_time = today = None
+    if delivery_ctx is not None:
+        cache, holidays, branch = delivery_ctx
+        # P1-1: 実行時刻・基準日は取込開始時に1回だけ固定し、全明細で共有する。
+        # 行ごとに datetime.now() を取ると、締切時刻付近・日跨ぎ・紐付き処理完了
+        # （execution_time.hour で分岐）で明細間の回答がブレるため。
+        execution_time = datetime.datetime.now()
+        today = datetime.date.today()
+    delivery_attempts = 0
+    delivery_errors = 0
+    delivery_fail_samples: list[str] = []
 
     rows: list[LedgerRow] = []
     for o in orders:
@@ -220,6 +248,24 @@ def build_ledger_rows(
         twf_no = format_twf_no(info.number) if info else ""
         customer = info.customer if info else ""
 
+        # 回答納期（納期回答書と同じ build_report_row 経由。分納/欠品の上書き込み）。
+        # 1明細の不正データで取込全体を止めないよう行単位で握るが、系統的失敗は
+        # 後段の失敗率チェック（P1-4）で検知して中止する。
+        delivery_answer = ""
+        if cache is not None:
+            delivery_attempts += 1
+            try:
+                _, delivery_answer = build_report_row(
+                    o, cache, holidays, branch, execution_time, False, today
+                )
+            except Exception as e:  # noqa: BLE001 行データ起因を握る。系統失敗は下で停止
+                delivery_errors += 1
+                delivery_answer = ""
+                if len(delivery_fail_samples) < 10:
+                    delivery_fail_samples.append(
+                        f"{onum}|{o.detail_number.strip()}:{type(e).__name__}"
+                    )
+
         rows.append(
             LedgerRow(
                 twf_no=twf_no,
@@ -231,9 +277,24 @@ def build_ledger_rows(
                 product=o.product_name.strip(),
                 quantity=o.quantity.strip(),
                 tehai=classify_tehai(o),
+                delivery_answer=delivery_answer,
                 rep_name=o.rep_name.strip(),
             )
         )
+
+    # P1-4: 系統的失敗（全件/高率）は設定ミス・マスター不整合・実装バグの疑い。
+    # 全件空欄でも「成功」に見えるのを防ぐため、高率なら停止して気づけるようにする。
+    if delivery_attempts and delivery_errors:
+        ratio = delivery_errors / delivery_attempts
+        sample = "  ".join(delivery_fail_samples)
+        summary = (f"{delivery_errors}/{delivery_attempts}明細"
+                   f"（{ratio:.0%}）  例: {sample}")
+        if ratio >= DELIVERY_FAIL_ABORT_RATIO:
+            raise SystemExit(
+                "⚠ 回答納期の計算が大量に失敗しました（設定ミス・マスター不整合・"
+                f"実装バグの疑い）。取込を中止します。\n  {summary}"
+            )
+        print(f"⚠ 回答納期の計算に失敗: {summary}（該当明細のみ空欄で続行）")
 
     rows.sort(
         key=lambda r: twf_sort_key(r.twf_no, r.order_number, r.detail_number)
@@ -450,8 +511,14 @@ def write_ledger(rows: list[LedgerRow], out_path: str | Path) -> Path:
 # ============================================
 # 受注一覧の読込
 # ============================================
-def load_orders(source_path: str | Path) -> list[OrderRow]:
-    """SAP受注一覧ファイルを読み込んで OrderRow のリストにする。"""
+def load_orders_with_meta(
+    source_path: str | Path,
+) -> tuple[list[OrderRow], list[list[str]], dict[str, int], int]:
+    """受注一覧を読み、(orders, source_data, cols, header_row_idx) を返す。
+
+    回答納期の計算（build_all_caches / load_branch_settings）には素データと
+    列位置・ヘッダー行インデックスが要るため、これらも一緒に返す。
+    """
     data = load_source_file(source_path)
     result = get_column_positions(data)
     if result is None:
@@ -462,7 +529,12 @@ def load_orders(source_path: str | Path) -> list[OrderRow]:
     for i in get_data_rows_range(data, cols, header_row_idx):
         if is_data_row(data, i, cols):
             orders.append(parse_order_row(data, i, cols))
-    return orders
+    return orders, data, cols, header_row_idx
+
+
+def load_orders(source_path: str | Path) -> list[OrderRow]:
+    """SAP受注一覧ファイルを読み込んで OrderRow のリストにする。"""
+    return load_orders_with_meta(source_path)[0]
 
 
 # ============================================
@@ -500,6 +572,147 @@ def find_manufacturer_master(
         if cand.exists():
             return cand
     return None
+
+
+# ============================================
+# 回答納期コンテキスト（納期回答書と同じマスター・キャッシュを組む）
+# ============================================
+# 回答納期マスターの既定の置き場所。twf_ledger.py 自身が nouki_kaitou 直下に
+# あるため、その隣＝納期回答書ツールが読むのと同じ3マスターを指す。
+DELIVERY_MASTER_DIR_DEFAULT = Path(__file__).resolve().parent
+CUSTOMER_MASTER_NAME = "顧客マスター_v2.xlsm"
+HISTORY_NAME = "送付履歴.xlsx"
+
+
+def _safe_load_workbook(
+    path: str | Path, *, read_only: bool = False, data_only: bool = True
+) -> object | None:
+    """マスターを「あれば読む」。無い/使用中/壊れている → None。"""
+    path = Path(path)
+    if not path.exists():
+        return None
+    if is_file_open(path):
+        print(f"  警告: {path.name} が使用中のため読み飛ばします")
+        return None
+    try:
+        return openpyxl.load_workbook(
+            str(path), data_only=data_only, read_only=read_only
+        )
+    except Exception as e:  # 壊れたxlsx・想定外フォーマット等
+        print(f"  警告: {path.name} を読めませんでした（{e}）")
+        return None
+
+
+def _close_workbook(wb: object | None) -> None:
+    """workbook を閉じる（None・close不可でも例外を出さない）。"""
+    if wb is None:
+        return
+    try:
+        wb.close()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def build_delivery_context(
+    source_data: list[list[str]],
+    cols: dict[str, int],
+    header_row_idx: int = 4,
+    masters_dir: str | Path | None = None,
+) -> tuple | None:
+    """回答納期計算用の (CacheStore, holidays, branch) を組む。出せないとき None。
+
+    マスターは masters_dir（既定: twf_ledger.py と同じ nouki_kaitou フォルダ）から
+    読む。劣化方針は2段階:
+
+    - メーカー一覧.xlsx と 顧客マスター_v2.xlsm は **回答納期に必須**。どちらかが
+      無い/使用中/壊れていると、配送加算日数・配送曜日・路線便・祝日が効かず
+      「正しく見える間違った日付」が出てしまう。そのため None を返して
+      **全明細の回答納期を空欄にする**（嘘の日付を出さない＝P1-3）。取込自体は
+      止めない（status/note・他列は通常どおり）。
+    - 送付履歴.xlsx だけは optional。無い/古いと **受注納期=12/31 の明細のみ**
+      「確認中」（在庫販売は「日程調整中」）になり、それ以外の納期は正しく出る。
+
+    Returns:
+        (CacheStore, holidays, branch)、または必須マスター欠落時 None。
+    """
+    masters_dir = Path(masters_dir) if masters_dir else DELIVERY_MASTER_DIR_DEFAULT
+
+    mfg_wb = _safe_load_workbook(masters_dir / MANUFACTURER_MASTER_NAME)
+    cust_wb = _safe_load_workbook(masters_dir / CUSTOMER_MASTER_NAME)
+
+    # P1-3: メーカー一覧・顧客マスターは納期必須。欠けたら回答納期は出さない。
+    if mfg_wb is None or cust_wb is None:
+        missing = []
+        if mfg_wb is None:
+            missing.append(MANUFACTURER_MASTER_NAME)
+        if cust_wb is None:
+            missing.append(CUSTOMER_MASTER_NAME)
+        _close_workbook(mfg_wb)  # 片方だけ開けていたら閉じる
+        _close_workbook(cust_wb)
+        print(
+            "\n" + "=" * 64 + "\n"
+            f"⚠⚠ 回答納期を計算できません: {' / '.join(missing)} が読めません\n"
+            "   （無い/使用中/壊れている）。全明細の回答納期を空欄にします。\n"
+            "   メーカー一覧・顧客マスターは納期計算に必須です（近似値の間違った\n"
+            "   日付を出さないため、あえて空欄にしています）。\n"
+            f"   置き場所: {masters_dir}\n"
+            + "=" * 64 + "\n"
+        )
+        return None
+
+    # 送付履歴は optional（確認中一覧シートだけ使う）。
+    history_wb = _safe_load_workbook(
+        masters_dir / HISTORY_NAME, read_only=True, data_only=False
+    )
+    try:
+        confirming_ws = None
+        if history_wb is not None:
+            try:
+                confirming_ws = history_wb[CONFIRMING_SHEET_NAME]
+            except KeyError:
+                print(f"  警告: {HISTORY_NAME} に「{CONFIRMING_SHEET_NAME}」シートが無く、"
+                      f"12/31案件は「確認中」になります")
+
+        print(
+            "回答納期マスター: メーカー一覧=OK / 顧客マスター=OK / "
+            f"送付履歴(確認中)={'OK' if confirming_ws is not None else '無（12/31案件は確認中）'}"
+            f"  （元: {masters_dir}）"
+        )
+
+        cache = build_all_caches(mfg_wb, cust_wb, confirming_ws, source_data, cols)
+        holidays = load_holidays(mfg_wb)
+        branch = load_branch_settings(mfg_wb, source_data, cols, header_row_idx)
+    finally:
+        # P2-2: キャッシュ構築後は値を取り込み済み。ファイルハンドルを保持しない
+        # （Windowsで顧客マスター等を開きっぱなしにすると他者のロック要因になる）。
+        _close_workbook(mfg_wb)
+        _close_workbook(cust_wb)
+        _close_workbook(history_wb)
+
+    # P1-3(追加): ファイルは開けても必須シート欠落/実質空だと build_xxx_cache は
+    # 例外を出さず空辞書を返す。その場合 get_delivery_days_to_add は既定2日・
+    # 路線便なし等の「正しく見える間違った日付」を出してしまう。嘘の日付を出さない
+    # ため、必須キャッシュ（メーカー名/メーカー日数・顧客曜日等）が空なら全件空欄に倒す。
+    # ※ cust_pattern は旧フォーマットの正常マスターでも空のため判定に使わない。
+    mfg_ok = bool(cache.mfg_name)
+    cust_ok = bool(cache.cust_days or cache.cust_route or cache.cust_retention)
+    if not (mfg_ok and cust_ok):
+        broken = []
+        if not mfg_ok:
+            broken.append(MANUFACTURER_MASTER_NAME)
+        if not cust_ok:
+            broken.append(CUSTOMER_MASTER_NAME)
+        print(
+            "\n" + "=" * 64 + "\n"
+            f"⚠⚠ 回答納期を計算できません: {' / '.join(broken)} は開けましたが\n"
+            "   必須シート/データが空です（シート名違い・空ファイル・破損等）。\n"
+            "   近似値の間違った日付を出さないため、全明細の回答納期を空欄にします。\n"
+            f"   置き場所: {masters_dir}\n"
+            + "=" * 64 + "\n"
+        )
+        return None
+
+    return cache, holidays, branch
 
 
 # ============================================

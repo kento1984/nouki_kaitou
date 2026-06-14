@@ -5,15 +5,19 @@
 
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
-from nouki_kaitou.models import OrderRow
+from nouki_kaitou.models import BranchSettings, CacheStore, OrderRow
+from nouki_kaitou import twf_ledger
 from nouki_kaitou.twf_ledger import (
+    DELIVERY_FAIL_ABORT_RATIO,
     MANUFACTURER_UNKNOWN,
     STATUS_CHOICES,
     STATUS_DEFAULT,
     LedgerRow,
     apply_carryover,
+    build_delivery_context,
     build_ledger_rows,
     classify_tehai,
     format_twf_no,
@@ -349,3 +353,127 @@ def test_status_choices_count():
     # 廃止した選択肢が残っていないこと
     for removed in ("一部手配", "対象外・キャンセル", "メーカー発注済", "完了"):
         assert removed not in STATUS_CHOICES
+
+
+# ============================================
+# 回答納期（delivery_ctx）— Codex review 対応の回帰防止
+# ============================================
+def _twf_orders(n):
+    """TWF明細を n 件作る（注番・TWF No. を一意に）。"""
+    return [
+        _order(order_number=f"O{i:03d}", detail_number="10",
+               comment_detail=f"TWFNo.{i + 1:06d}　甲社様")
+        for i in range(n)
+    ]
+
+
+def test_delivery_ctx_populates_answer(monkeypatch):
+    """delivery_ctx を渡すと回答納期が入る。"""
+    monkeypatch.setattr(
+        twf_ledger, "build_report_row",
+        lambda *a, **k: (None, "7月2日配達予定"),
+    )
+    orders = _twf_orders(1)
+    ctx = (object(), {}, None)  # cache は非Noneであればよい（build_report_row は差替）
+    rows = build_ledger_rows(orders, None, delivery_ctx=ctx)
+    assert rows[0].delivery_answer == "7月2日配達予定"
+
+
+def test_delivery_ctx_none_keeps_blank_legacy():
+    """delivery_ctx を渡さない（None）と従来どおり全件空欄（既存挙動非破壊）。"""
+    orders = _twf_orders(2)
+    rows = build_ledger_rows(orders)            # 第3引数省略
+    assert all(r.delivery_answer == "" for r in rows)
+    rows2 = build_ledger_rows(orders, None, delivery_ctx=None)
+    assert all(r.delivery_answer == "" for r in rows2)
+
+
+def _fail_first(n_fail):
+    """最初の n_fail 回だけ例外、それ以降は正常値を返す build_report_row スタブ。"""
+    state = {"n": 0}
+
+    def stub(*a, **k):
+        state["n"] += 1
+        if state["n"] <= n_fail:
+            raise ValueError("計算失敗（テスト）")
+        return (None, "7月2日配達予定")
+
+    return stub
+
+
+def test_delivery_fail_below_threshold_continues(monkeypatch, capsys):
+    """49%失敗（<50%）→ 停止せず、該当明細のみ空欄で続行。"""
+    monkeypatch.setattr(twf_ledger, "build_report_row", _fail_first(49))
+    orders = _twf_orders(100)
+    rows = build_ledger_rows(orders, None, delivery_ctx=(object(), {}, None))
+    assert len(rows) == 100
+    assert sum(1 for r in rows if r.delivery_answer == "") == 49
+    assert "失敗" in capsys.readouterr().out  # 警告は出る
+
+
+def test_delivery_fail_at_threshold_aborts(monkeypatch):
+    """50%失敗（=閾値）→ SystemExit で取込中止。"""
+    monkeypatch.setattr(twf_ledger, "build_report_row", _fail_first(50))
+    orders = _twf_orders(100)
+    with pytest.raises(SystemExit):
+        build_ledger_rows(orders, None, delivery_ctx=(object(), {}, None))
+
+
+def test_delivery_fail_all_aborts(monkeypatch):
+    """100%失敗 → SystemExit で取込中止。"""
+    monkeypatch.setattr(twf_ledger, "build_report_row", _fail_first(10))
+    orders = _twf_orders(10)
+    with pytest.raises(SystemExit):
+        build_ledger_rows(orders, None, delivery_ctx=(object(), {}, None))
+
+
+def test_abort_ratio_constant():
+    """閾値は 0.5（50%以上で停止）。"""
+    assert DELIVERY_FAIL_ABORT_RATIO == 0.5
+
+
+def test_delivery_context_missing_file_returns_none(tmp_path, capsys):
+    """必須マスターのファイルが無い → None（全件空欄）＋警告。"""
+    ctx = build_delivery_context([], {}, masters_dir=tmp_path)  # 空ディレクトリ
+    assert ctx is None
+    assert "回答納期を計算できません" in capsys.readouterr().out
+
+
+def test_delivery_context_empty_master_returns_none(monkeypatch, capsys):
+    """ファイルは開けるが必須キャッシュが空（シート欠落・空ファイル）→ None。"""
+    def fake_load(path, **kwargs):
+        # 送付履歴は optional（None）、メーカー/顧客は「開ける」体で非Noneを返す
+        if Path(path).name == twf_ledger.HISTORY_NAME:
+            return None
+        return object()
+
+    monkeypatch.setattr(twf_ledger, "_safe_load_workbook", fake_load)
+    monkeypatch.setattr(twf_ledger, "build_all_caches", lambda *a, **k: CacheStore())
+    monkeypatch.setattr(twf_ledger, "load_holidays", lambda wb: {})
+    monkeypatch.setattr(twf_ledger, "load_branch_settings", lambda *a, **k: BranchSettings())
+
+    ctx = build_delivery_context([], {}, masters_dir="dummy")
+    assert ctx is None
+    assert "回答納期を計算できません" in capsys.readouterr().out
+
+
+def test_execution_time_fixed_across_rows(monkeypatch):
+    """P1-1: execution_time / today は全行で同一（行ごとの datetime.now() でない）。"""
+    seen = []
+
+    def stub(row, cache, holidays, branch, execution_time, force_delivered, today):
+        seen.append((execution_time, force_delivered, today))
+        return (None, "7月2日配達予定")
+
+    monkeypatch.setattr(twf_ledger, "build_report_row", stub)
+    orders = _twf_orders(5)
+    build_ledger_rows(orders, None, delivery_ctx=(object(), {}, None))
+
+    assert len(seen) == 5
+    exec_times = {s[0] for s in seen}
+    todays = {s[2] for s in seen}
+    assert len(exec_times) == 1          # 全行で同一の実行時刻
+    assert len(todays) == 1              # 全行で同一の基準日
+    assert next(iter(exec_times)) is not None
+    assert next(iter(todays)) is not None
+    assert all(s[1] is False for s in seen)  # force_delivered は False 固定
