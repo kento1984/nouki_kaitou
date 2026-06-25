@@ -102,13 +102,19 @@ def _build_override_sheet(ws, override_rows: list[list] | None = None) -> None:
             if col_idx <= len(_OVERRIDE_HEADERS):
                 ws.cell(row=row_idx, column=col_idx).value = value
 
-    last_row = max(len(override_rows) + 1, 1)
-    last_col = get_column_letter(len(_OVERRIDE_HEADERS))
-    tbl = Table(displayName=_OVERRIDE_TABLE_NAME, ref=f"A1:{last_col}{last_row}")
-    tbl.tableStyleInfo = TableStyleInfo(
-        name="TableStyleMedium4", showRowStripes=True
-    )
-    ws.add_table(tbl)
+    # Excelのテーブルはヘッダのみ（データ0行）だと不正とみなされ、ファイルを
+    # 開くと「修復」ダイアログでテーブル定義・オートフィルターが削除される。
+    # 納期上書きシートは初期状態で必ず空になるため、データが無いときは
+    # テーブルを作らず素のヘッダ行だけにする（手入力で1行でも入れば、
+    # 次回保存時に有効なテーブルが作られる）。
+    if override_rows:
+        last_row = len(override_rows) + 1
+        last_col = get_column_letter(len(_OVERRIDE_HEADERS))
+        tbl = Table(displayName=_OVERRIDE_TABLE_NAME, ref=f"A1:{last_col}{last_row}")
+        tbl.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium4", showRowStripes=True
+        )
+        ws.add_table(tbl)
 
 
 def load_delivery_overrides(ws) -> dict[str, str]:

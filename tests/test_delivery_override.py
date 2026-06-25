@@ -308,6 +308,42 @@ class TestSheetIO:
         assert OVERRIDE_SHEET_NAME in wb.sheetnames
         assert load_delivery_overrides(wb[OVERRIDE_SHEET_NAME]) == {}
 
+    def _override_table_ref(self, path):
+        """xlsx内の納期上書きテーブルの ref を返す（無ければNone）。"""
+        import re
+        import zipfile
+        z = zipfile.ZipFile(path)
+        for n in z.namelist():
+            if re.match(r"xl/tables/table\d+\.xml$", n):
+                x = z.read(n).decode("utf8")
+                if "納期上書き" in x:
+                    return re.search(r'ref="([^"]+)"', x).group(1)
+        return None
+
+    def test_empty_override_has_no_header_only_table(self, tmp_path):
+        """空の納期上書きシートはヘッダのみテーブル(A1:D1)を作らない。
+
+        Excelはデータ0行のテーブルを不正とみなし、開くと『修復』で
+        テーブル・オートフィルターを削除する。空のときはテーブル自体を
+        作らないことで、この修復ダイアログを防ぐ（本番回帰）。
+        """
+        path = str(tmp_path / "送付履歴.xlsx")
+        initialize_delivery_history(path)
+        save_history_batch(
+            path, [], [], [], [], EXEC, "tester", today=TODAY, override_rows=[]
+        )
+        assert self._override_table_ref(path) is None  # テーブルなし
+
+    def test_override_with_data_has_valid_table(self, tmp_path):
+        """データが1行でも入れば有効なテーブル(A1:D2)が作られる。"""
+        path = str(tmp_path / "送付履歴.xlsx")
+        initialize_delivery_history(path)
+        save_history_batch(
+            path, [], [], [], [], EXEC, "tester", today=TODAY,
+            override_rows=[["9000001", "10", "7月3日納品予定", ""]],
+        )
+        assert self._override_table_ref(path) == "A1:D2"
+
 
 # ============================================
 # Codexレビュー指摘の回帰テスト
