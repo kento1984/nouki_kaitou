@@ -432,6 +432,15 @@ class TestHimozukiDeliveryDateInTwf:
                            specified_delivery_date=datetime.date(2026, 7, 1))]
         assert self._twf(data, tmp_path) == ["納品済み"]
 
+    def test_shipping_diff_shows_shukka_yotei(self, tmp_path):
+        """受注先≠出荷先の紐付きは既存仕様どおり「出荷予定」で出る
+        （配達予定でなく出荷予定。納品済みにはしない）。Codex残リスク2の固定。
+        """
+        data = [self._himo(ship_to_name="別の現場",
+                           specified_delivery_date=datetime.date(2026, 7, 1))]
+        ans = self._twf(data, tmp_path)
+        assert ans[0].endswith("出荷予定") and ans[0] != "納品済み"
+
     def test_normal_mode_unaffected(self, tmp_path):
         """通常モード（非TWF）は変更前と同じく計算日を出す（B はTWF限定）"""
         row = self._himo(specified_delivery_date=datetime.date(2026, 7, 1))
