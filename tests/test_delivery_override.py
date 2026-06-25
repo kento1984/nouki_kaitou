@@ -375,3 +375,72 @@ class TestKeyNormalization:
             delivery_overrides={normalize_order_detail_key("7000001", 10.0): "X"}
         )
         assert get_delivery_override("7000001", "10", cache) == "X"
+
+
+# ============================================
+# B: 指定納期あり紐付き＋処理完了を配達予定/済み日で出す（TWF限定）
+# ============================================
+class TestHimozukiDeliveryDateInTwf:
+    """TWFで「指定納期あり紐付き＋処理完了」を納品済みでなく具体的な
+    配達予定/配達済み日で出す。指定納期なし紐付き・直送は納品済み維持。
+    """
+
+    def _himo(self, **kw):
+        """紐付き(直送販売＋非転送中)＋処理完了 の TWF 明細。"""
+        d = dict(
+            order_number="8000001", detail_number="10",
+            document_type="【受注】直送販売", ship_status="処理完了",
+            storage_place="関東商品センター",  # 非転送中＝紐付き
+            # 顧客名/出荷先は _make_row 既定（テスト商事）＝自社便。
+            # create_delivery_report の顧客名フィルタと _twf_answers の
+            # customer_name("テスト商事") に一致させる
+            comment_detail="TWFNo.001 テスト商事様",
+            registration_date=datetime.date(2026, 6, 20),
+            specified_delivery_date=None,
+        )
+        d.update(kw)
+        return _make_row(**d)
+
+    def _twf(self, data, tmp_path):
+        return _twf_answers(data, _make_cache(), {"8000001|10": "x"}, tmp_path)
+
+    def test_future_spec_shows_haitatsu_yotei(self, tmp_path):
+        """指定納期が未来 → ○月○日配達予定（納品済みにしない）"""
+        data = [self._himo(specified_delivery_date=datetime.date(2026, 7, 1))]
+        ans = self._twf(data, tmp_path)
+        assert ans[0] == "7月3日配達予定"
+
+    def test_past_spec_shows_haitatsu_zumi_date(self, tmp_path):
+        """指定納期が過去 → ○月○日配達済み（具体日。納品済みにしない）"""
+        data = [self._himo(specified_delivery_date=datetime.date(2026, 6, 20))]
+        ans = self._twf(data, tmp_path)
+        assert ans[0].endswith("配達済み") and ans[0] != "納品済み"
+
+    def test_no_spec_stays_nouhinzumi(self, tmp_path):
+        """指定納期なし紐付き（today基準で毎日スライド）→ 納品済み維持"""
+        data = [self._himo(specified_delivery_date=None)]
+        assert self._twf(data, tmp_path) == ["納品済み"]
+
+    def test_dec31_spec_stays_nouhinzumi(self, tmp_path):
+        """指定納期=12/31（未確定）→ 指定納期なし扱い → 納品済み維持"""
+        data = [self._himo(specified_delivery_date=datetime.date(2026, 12, 31))]
+        assert self._twf(data, tmp_path) == ["納品済み"]
+
+    def test_chokusou_stays_nouhinzumi(self, tmp_path):
+        """直送（転送中）＋処理完了は指定納期があっても納品済み維持"""
+        data = [self._himo(storage_place="転送中（直送用）",
+                           specified_delivery_date=datetime.date(2026, 7, 1))]
+        assert self._twf(data, tmp_path) == ["納品済み"]
+
+    def test_normal_mode_unaffected(self, tmp_path):
+        """通常モード（非TWF）は変更前と同じく計算日を出す（B はTWF限定）"""
+        row = self._himo(specified_delivery_date=datetime.date(2026, 7, 1))
+        result = create_delivery_report(
+            [row], "テスト商事", {},  # sentなし＝スキップされない
+            _make_cache(), tmp_path, {}, BRANCH, EXEC, today=TODAY,
+        )
+        ws = load_workbook(result.file_path).active
+        col = next(c for c in range(1, 15) if ws.cell(6, c).value == "納期回答")
+        answers = [ws.cell(r, col).value for r in range(7, ws.max_row + 1)
+                   if ws.cell(r, 12).value]
+        assert answers == ["7月3日配達予定"]  # 元から納品済みにしていない

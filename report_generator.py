@@ -71,6 +71,7 @@ from nouki_kaitou.twf import (
 from nouki_kaitou.utils import (
     build_report_filename,
     build_sheet_name,
+    is_december_31,
     normalize_item_group_code,
     normalize_name_for_comparison,
 )
@@ -544,12 +545,27 @@ def create_delivery_report(
                 report_row.delivery_answer = "納品済み"
 
             # TWFモード: 処理完了かつ回答済み（履歴に確定記録あり）の伝票は
-            # 「納品済み」表示に上書きする。
+            # 原則「納品済み」表示に上書きする。
             # 履歴チェックを表示でスキップするため、force_delivered の既存判定
-            # （履歴が空 or 確認中のときのみ発火）を通らないケースの補完
+            # （履歴が空 or 確認中のときのみ発火）を通らないケースの補完。
+            #
+            # 【例外】指定納期がある紐付き（直送販売＋非転送中）は上書きしない。
+            # この場合 delivery_status には指定納期ベースの固定日（優先4・
+            # _check_specified_date が出す「○月○日配達予定/配達済み」）が既に
+            # 入っている。TWFは納品完了まで毎日全件送るため、曖昧な「納品済み」
+            # より具体的な配達予定日を出す方が客に役立ち実態に合う。
+            # 配達日が過ぎていれば _result が自動で「配達済み」を出す。
+            # 指定納期なし紐付き（_check_himozuki_completed は today 基準で
+            # 毎日スライドする予測のため信頼できない）と直送は従来どおり納品済み。
+            himozuki_with_spec = (
+                is_himozuki
+                and row.specified_delivery_date is not None
+                and not is_december_31(row.specified_delivery_date)
+            )
             if (twf_mode
                     and row.ship_status == "処理完了"
-                    and previous_status not in ("", "確認中")):
+                    and previous_status not in ("", "確認中")
+                    and not himozuki_with_spec):
                 delivery_status = "納品済み"
                 report_row.delivery_answer = "納品済み"
 
