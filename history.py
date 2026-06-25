@@ -32,10 +32,12 @@ from nouki_kaitou.models import (
 # テーブル名
 _HISTORY_TABLE_NAME = "送付履歴テーブル"
 _CONFIRMING_TABLE_NAME = "確認中テーブル"
+_OVERRIDE_TABLE_NAME = "納期上書きテーブル"
 
 # シート名
 HISTORY_SHEET_NAME = "送付履歴"
 CONFIRMING_SHEET_NAME = "確認中一覧"
+OVERRIDE_SHEET_NAME = "納期上書き"
 
 # 送付履歴・確認中一覧の保持日数（この日数を超えた古いレコードを自動削除）
 DEFAULT_DAYS_TO_KEEP = 365
@@ -56,6 +58,13 @@ _CONFIRMING_HEADERS = [
 _HISTORY_WIDTHS = [17, 12, 25, 15, 8, 20, 47, 22, 18]
 _CONFIRMING_WIDTHS = [17, 12, 25, 15, 8, 20, 47, 13, 12, 18, 18]
 
+# 納期上書きヘッダー（4列）。SAP施錠等でツール計算の納期が直せない明細を、
+# 手書きの逐語文字列で最優先に上書きする運用シート（任意・期間限定運用）。
+# 「納期回答(上書き)」に書いた文字列がそのまま客向け回答書に出る。
+# 空（シート無し or 未記入）なら全明細が従来どおり＝完全no-op。
+_OVERRIDE_HEADERS = ["受発注伝票", "明細", "納期回答(上書き)", "メモ"]
+_OVERRIDE_WIDTHS = [15, 8, 30, 30]
+
 
 def _to_int_detail(detail: object) -> int | str:
     """明細番号をint型に変換する。VBAとの互換性のため数値で書き込む。"""
@@ -68,6 +77,106 @@ def _to_int_detail(detail: object) -> int | str:
 def _get_default_sender() -> str:
     """Windowsのログインユーザー名を取得する。VBAと同じ形式。"""
     return os.environ.get("USERNAME", "")
+
+
+# ============================================
+# 納期上書きシート（任意・期間限定運用）
+# ============================================
+def _build_override_sheet(ws, override_rows: list[list] | None = None) -> None:
+    """納期上書きシートにヘッダー・列幅・テーブル・データを設定する。
+
+    initialize_delivery_history と _write_history_workbook で共用する。
+    override_rows を渡すとデータ行も書き込む（保全用のラウンドトリップ）。
+    """
+    override_rows = override_rows or []
+
+    for col_idx, header in enumerate(_OVERRIDE_HEADERS, 1):
+        ws.cell(row=1, column=col_idx).value = header
+
+    for col_idx, width in enumerate(_OVERRIDE_WIDTHS, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    for row_idx, row_data in enumerate(override_rows, 2):
+        for col_idx, value in enumerate(row_data, 1):
+            if col_idx <= len(_OVERRIDE_HEADERS):
+                ws.cell(row=row_idx, column=col_idx).value = value
+
+    last_row = max(len(override_rows) + 1, 1)
+    last_col = get_column_letter(len(_OVERRIDE_HEADERS))
+    tbl = Table(displayName=_OVERRIDE_TABLE_NAME, ref=f"A1:{last_col}{last_row}")
+    tbl.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium4", showRowStripes=True
+    )
+    ws.add_table(tbl)
+
+
+def load_delivery_overrides(ws) -> dict[str, str]:
+    """納期上書きシートを読み、{注番|明細: 上書き文字列} を返す。
+
+    SAP施錠等でツール計算の納期を直せない明細を、運用者が手書きした
+    逐語文字列で最優先に差し替えるための仕組み。
+
+    - シートが無い（ws=None）/空なら空dict（＝完全no-op）。
+    - 「納期回答(上書き)」列（3列目）が空の行は無視する
+      （受発注伝票だけ書いて回答未記入なら上書きしない）。
+
+    Args:
+        ws: 納期上書きシート（Noneなら空dict）
+
+    Returns:
+        {注番|明細: 上書き文字列}
+    """
+    overrides: dict[str, str] = {}
+    if ws is None:
+        return overrides
+
+    for row_data in ws.iter_rows(
+        min_row=2, max_col=len(_OVERRIDE_HEADERS), values_only=True
+    ):
+        if not row_data:
+            continue
+        order_num = str(row_data[0]).strip() if row_data[0] else ""
+        detail_num = (
+            str(row_data[1]).strip() if len(row_data) > 1 and row_data[1] else ""
+        )
+        answer = (
+            str(row_data[2]).strip() if len(row_data) > 2 and row_data[2] else ""
+        )
+        if not order_num or not answer:
+            continue
+        key = f"{order_num}|{detail_num}"
+        if key not in overrides:  # 先頭行優先
+            overrides[key] = answer
+
+    return overrides
+
+
+def extract_override_rows(ws) -> list[list]:
+    """read_only シートから納期上書きの全データ行をメモリに読み出す（保全用）。
+
+    _write_history_workbook がワークブックを毎回新規作成するため、
+    既存の上書き行をここで読み出して書き戻しに渡す（消えないように）。
+    受発注伝票（1列目）が空の行はスキップ。
+
+    Args:
+        ws: read_only=True で開いた納期上書きシート（Noneなら空リスト）
+
+    Returns:
+        各行のリスト（ヘッダー行除く）
+    """
+    rows: list[list] = []
+    if ws is None:
+        return rows
+    for row_data in ws.iter_rows(
+        min_row=2, max_col=len(_OVERRIDE_HEADERS), values_only=True
+    ):
+        if not row_data:
+            continue
+        order_num = row_data[0] if len(row_data) > 0 else None
+        if order_num is None or str(order_num).strip() == "":
+            continue
+        rows.append(list(row_data))
+    return rows
 
 
 # ============================================
@@ -122,6 +231,9 @@ def initialize_delivery_history(file_path: str) -> Workbook:
         name="TableStyleMedium1", showRowStripes=True
     )
     ws_confirming.add_table(tbl_confirming)
+
+    # === 納期上書きシート（任意・期間限定運用。空なら完全no-op） ===
+    _build_override_sheet(wb.create_sheet(OVERRIDE_SHEET_NAME))
 
     wb.save(file_path)
     return wb
@@ -694,6 +806,7 @@ def save_history_batch(
     days_to_keep: int = DEFAULT_DAYS_TO_KEEP,
     today: datetime.date | None = None,
     deleted_keys: set[str] | None = None,
+    override_rows: list[list] | None = None,
 ) -> None:
     """送付履歴ファイルの全更新を1回のバッチで実行する。
 
@@ -712,6 +825,9 @@ def save_history_batch(
         today: 基準日（テスト用）
         deleted_keys: SAPで明細削除された伝票のキーセット（"注番|明細"形式）。
             確認中一覧に存在すれば除去する。送付履歴には移動しない。
+        override_rows: 納期上書きシートの既存データ行（保全用）。
+            ワークブックを新規作成するため、渡さないと上書きシートが
+            空になる。Noneならヘッダーのみの空シートになる。
     """
     if today is None:
         today = datetime.date.today()
@@ -850,7 +966,7 @@ def save_history_batch(
     )
 
     # --- ステップ8: 新規Workbook書き出し ---
-    _write_history_workbook(file_path, hist_rows, conf_rows, today)
+    _write_history_workbook(file_path, hist_rows, conf_rows, today, override_rows)
 
 
 def _filter_old_rows(rows: list[list], cutoff_date: datetime.date) -> list[list]:
@@ -868,6 +984,7 @@ def _write_history_workbook(
     history_rows: list[list],
     confirming_rows: list[list],
     today: datetime.date | None = None,
+    override_rows: list[list] | None = None,
 ) -> None:
     """送付履歴Workbookを新規作成し、データを書き出す。
 
@@ -879,6 +996,7 @@ def _write_history_workbook(
         history_rows: 送付履歴のデータ行
         confirming_rows: 確認中一覧のデータ行
         today: 基準日（色分け用）
+        override_rows: 納期上書きシートのデータ行（保全用。Noneなら空シート）
     """
     from nouki_kaitou.excel_writer import color_confirming_list
 
@@ -957,5 +1075,8 @@ def _write_history_workbook(
 
     # 色分け
     color_confirming_list(ws_confirming, today)
+
+    # === 納期上書きシート（既存データを保全して書き戻す。空なら完全no-op） ===
+    _build_override_sheet(wb.create_sheet(OVERRIDE_SHEET_NAME), override_rows)
 
     wb.save(file_path)

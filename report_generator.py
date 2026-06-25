@@ -25,6 +25,7 @@ from nouki_kaitou.confirming import get_confirmed_delivery_date, get_confirming_
 from nouki_kaitou.customer import is_route_delivery
 from nouki_kaitou.delivery_calc import (
     calculate_delivery_date,
+    get_delivery_override,
     extract_pickup_date,
 )
 from nouki_kaitou.excel_writer import (
@@ -514,27 +515,35 @@ def create_delivery_report(
             force_delivered, today
         )
 
-        # forceDelivered時の納品済み上書き
-        if force_delivered and delivery_status in (
-            "確認中", "欠品中", "日程調整中"
-        ) or (force_delivered and "（欠品）" in delivery_status):
-            delivery_status = "納品済み"
-            report_row.delivery_answer = "納品済み"
+        # 納期上書きが効いている明細は、以降の「納品済み」上書きを一切かけない。
+        # build_report_row（calculate_delivery_dateの優先0）が既に逐語の上書き
+        # 文字列を delivery_status / delivery_answer に入れているため、それを守る。
+        has_override = get_delivery_override(
+            row.order_number, row.detail_number, cache
+        ) is not None
 
-        # 分納完了 → 納品済み上書き
-        if is_bunno_completed:
-            delivery_status = "納品済み"
-            report_row.delivery_answer = "納品済み"
+        if not has_override:
+            # forceDelivered時の納品済み上書き
+            if force_delivered and delivery_status in (
+                "確認中", "欠品中", "日程調整中"
+            ) or (force_delivered and "（欠品）" in delivery_status):
+                delivery_status = "納品済み"
+                report_row.delivery_answer = "納品済み"
 
-        # TWFモード: 処理完了かつ回答済み（履歴に確定記録あり）の伝票は
-        # 「納品済み」表示に上書きする。
-        # 履歴チェックを表示でスキップするため、force_delivered の既存判定
-        # （履歴が空 or 確認中のときのみ発火）を通らないケースの補完
-        if (twf_mode
-                and row.ship_status == "処理完了"
-                and previous_status not in ("", "確認中")):
-            delivery_status = "納品済み"
-            report_row.delivery_answer = "納品済み"
+            # 分納完了 → 納品済み上書き
+            if is_bunno_completed:
+                delivery_status = "納品済み"
+                report_row.delivery_answer = "納品済み"
+
+            # TWFモード: 処理完了かつ回答済み（履歴に確定記録あり）の伝票は
+            # 「納品済み」表示に上書きする。
+            # 履歴チェックを表示でスキップするため、force_delivered の既存判定
+            # （履歴が空 or 確認中のときのみ発火）を通らないケースの補完
+            if (twf_mode
+                    and row.ship_status == "処理完了"
+                    and previous_status not in ("", "確認中")):
+                delivery_status = "納品済み"
+                report_row.delivery_answer = "納品済み"
 
         if twf_mode:
             # --- TWF専用レイアウト用のデータ整形 ---

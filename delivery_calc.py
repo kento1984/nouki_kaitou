@@ -218,6 +218,32 @@ def extract_arrival_date_from_internal(
 # VBA: CalculateDeliveryDate (L3034-3783)
 # 納期計算メイン関数
 # ============================================
+def get_delivery_override(
+    order_number: str, detail_number: str, cache: CacheStore
+) -> Optional[str]:
+    """納期上書きシートの逐語上書き文字列を返す（無ければNone）。
+
+    SAP施錠等でツール計算の納期を直せない明細を、運用者が「納期上書き」シートに
+    手書きした文字列で最優先に差し替えるための仕組み。シートが空（未記入）なら
+    cache.delivery_overrides は空dictなので常にNone＝完全no-op。
+
+    Args:
+        order_number: 受発注伝票
+        detail_number: 明細
+        cache: キャッシュストア
+
+    Returns:
+        上書き文字列（前後空白除去後・非空）、なければNone
+    """
+    key = f"{str(order_number).strip()}|{str(detail_number).strip()}"
+    value = cache.delivery_overrides.get(key)
+    if value:
+        value = str(value).strip()
+        if value:
+            return value
+    return None
+
+
 def calculate_delivery_date(
     row: OrderRow,
     cache: CacheStore,
@@ -260,6 +286,16 @@ def calculate_delivery_date(
         branch = BranchSettings()
     if execution_time is None:
         execution_time = datetime.datetime.now()
+
+    # ============================================
+    # 0. 納期上書き（最優先）
+    #    「納期上書き」シートに該当明細があれば、逐語文字列をそのまま返す。
+    #    指定納期（優先4）も含む全分岐より先に確定する。SAP施錠等でツール計算
+    #    の納期を直せない明細の救済（運用データで上書き）。シート空なら無視。
+    # ============================================
+    override = get_delivery_override(row.order_number, row.detail_number, cache)
+    if override is not None:
+        return override
 
     # ============================================
     # 1. &&作業チェック

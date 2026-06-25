@@ -42,9 +42,12 @@ from nouki_kaitou.email_builder import create_emails
 from nouki_kaitou.history import (
     CONFIRMING_SHEET_NAME,
     HISTORY_SHEET_NAME,
+    OVERRIDE_SHEET_NAME,
+    extract_override_rows,
     extract_sheet_rows,
     initialize_delivery_history,
     load_delivery_history,
+    load_delivery_overrides,
     save_history_batch,
 )
 from nouki_kaitou.models import BranchSettings, OrderRow, ReportResult
@@ -589,6 +592,16 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
             cache = build_all_caches(mfg_wb, cust_wb, ws_confirming_ro, source_data_raw, cols)
             holidays = load_holidays(mfg_wb) if mfg_wb is not None else {}
 
+            # 納期上書きシート（任意・期間限定運用）。無ければ完全no-op。
+            # 既存の送付履歴.xlsxにシートが無くても落とさず、後の保存時に
+            # 空シートが追加される（次回以降ここに手書きすれば最優先で反映）。
+            if OVERRIDE_SHEET_NAME in history_wb_ro.sheetnames:
+                ws_override_ro = history_wb_ro[OVERRIDE_SHEET_NAME]
+                cache.delivery_overrides = load_delivery_overrides(ws_override_ro)
+                override_rows = extract_override_rows(ws_override_ro)
+            else:
+                override_rows = []
+
             t_data_ready = time.perf_counter()
             print(f"営業所: {branch.name}")
             print(f"データ読み込み: {t_data_ready - t_run_start:.2f}s（うち送付履歴: {t_data_ready - t_history_load:.2f}s）")
@@ -846,6 +859,7 @@ def run(args: argparse.Namespace, preloaded: dict | None = None) -> None:
             all_confirmed, all_confirming,
             execution_time, args.sender,
             deleted_keys=deleted_keys,
+            override_rows=override_rows,
         )
         save_elapsed = time.perf_counter() - t_save
         if has_updates:

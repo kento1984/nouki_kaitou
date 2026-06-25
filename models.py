@@ -100,6 +100,15 @@ class CacheStore:
     )
     """注番|明細 → (問合せ状況, ステータス, 受注納期)"""
 
+    # 納期上書きシートから構築（任意・期間限定運用）
+    delivery_overrides: dict[str, str] = field(default_factory=dict)
+    """注番|明細 → 納期回答の逐語上書き文字列。
+
+    SAP施錠等でツール計算の納期を直せない明細を、運用者が手書きした
+    文字列で最優先に差し替えるための仕組み。空（=シート無し/未記入）なら
+    完全に無視され、全明細が従来どおりの計算結果になる（完全no-op）。
+    """
+
     # 顧客マスターから構築（配送パターン）
     cust_pattern: dict[str, str] = field(default_factory=dict)
     """顧客名 → 配送パターン名"""
