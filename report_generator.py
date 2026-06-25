@@ -173,9 +173,16 @@ def build_report_row(
         row, cache, holidays, branch, execution_time, today
     )
 
+    # 納期上書きが効いている明細は、以降の分納/欠品による納期回答の再上書きを
+    # 一切かけない。calculate_delivery_date（優先0）が返した逐語文字列を
+    # build_report_row 内でも守り、「逐語を最優先」契約を貫く。
+    override_active = get_delivery_override(
+        row.order_number, row.detail_number, cache
+    ) is not None
+
     # --- 分納判定 ---
     bunno_info = extract_bunno_info(row.comment_detail)
-    if bunno_info and row.ship_status != "処理完了":
+    if not override_active and bunno_info and row.ship_status != "処理完了":
         delivery_answer = "分納"
 
     # --- 欠品判定 ---
@@ -187,7 +194,8 @@ def build_report_row(
     if confirmed_date is not None:
         has_confirmed_date = True
 
-    if ("欠品中" in row.comment_detail
+    if (not override_active
+            and "欠品中" in row.comment_detail
             and row.ship_status != "処理完了"
             and not has_confirmed_date):
         if delivery_answer in ("確認中", "日程調整中"):

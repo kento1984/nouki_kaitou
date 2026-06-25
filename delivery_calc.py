@@ -41,6 +41,7 @@ from nouki_kaitou.utils import (
     format_date_japanese,
     is_december_31,
     normalize_name_for_comparison,
+    normalize_order_detail_key,
     parse_time,
 )
 
@@ -235,7 +236,7 @@ def get_delivery_override(
     Returns:
         上書き文字列（前後空白除去後・非空）、なければNone
     """
-    key = f"{str(order_number).strip()}|{str(detail_number).strip()}"
+    key = normalize_order_detail_key(order_number, detail_number)
     value = cache.delivery_overrides.get(key)
     if value:
         value = str(value).strip()

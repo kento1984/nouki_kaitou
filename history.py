@@ -28,6 +28,7 @@ from nouki_kaitou.models import (
     HolidayMap,
     HistoryRecord,
 )
+from nouki_kaitou.utils import normalize_order_detail_key
 
 # テーブル名
 _HISTORY_TABLE_NAME = "送付履歴テーブル"
@@ -144,7 +145,7 @@ def load_delivery_overrides(ws) -> dict[str, str]:
         )
         if not order_num or not answer:
             continue
-        key = f"{order_num}|{detail_num}"
+        key = normalize_order_detail_key(row_data[0], row_data[1])
         if key not in overrides:  # 先頭行優先
             overrides[key] = answer
 

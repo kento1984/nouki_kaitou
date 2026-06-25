@@ -14,7 +14,35 @@ from __future__ import annotations
 import datetime
 import os
 import re
+import unicodedata
 from pathlib import Path
+
+
+def normalize_order_detail_key(order_number: object, detail_number: object) -> str:
+    """注番・明細を正準化して "注番|明細" キーを作る。
+
+    納期上書きシート（手入力Excel）とSAPデータの表記ゆれによる
+    マッチ漏れ・誤マッチを防ぐための共通キー生成。
+    - 注番: NFKC正規化（全角英数→半角）＋前後空白除去
+    - 明細: NFKC＋空白除去。整数的（"010" / "10.0" / 全角"１０"）なら
+      正準整数文字列へ（→ "10"）。非数値はそのまま文字列比較。
+
+    Args:
+        order_number: 受発注伝票（型不問。Noneや数値セルも可）
+        detail_number: 明細（同上）
+
+    Returns:
+        正準化した "注番|明細" 文字列
+    """
+    order = unicodedata.normalize("NFKC", str(order_number or "")).strip()
+    detail = unicodedata.normalize("NFKC", str(detail_number or "")).strip()
+    try:
+        num = float(detail)
+        if num == int(num):
+            detail = str(int(num))
+    except (ValueError, TypeError):
+        pass
+    return f"{order}|{detail}"
 
 
 # ============================================

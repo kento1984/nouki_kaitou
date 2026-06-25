@@ -26,7 +26,8 @@ from nouki_kaitou.history import (
     save_history_batch,
 )
 from nouki_kaitou.models import BranchSettings, CacheStore, OrderRow
-from nouki_kaitou.report_generator import create_delivery_report
+from nouki_kaitou.report_generator import build_report_row, create_delivery_report
+from nouki_kaitou.utils import normalize_order_detail_key
 
 # ============================================
 # テスト用ヘルパー（test_twf.py と同パターン）
@@ -306,3 +307,71 @@ class TestSheetIO:
         wb = load_workbook(path)
         assert OVERRIDE_SHEET_NAME in wb.sheetnames
         assert load_delivery_overrides(wb[OVERRIDE_SHEET_NAME]) == {}
+
+
+# ============================================
+# Codexレビュー指摘の回帰テスト
+# ============================================
+class TestOverrideBeatsBunnoKeppin:
+    """指摘①: build_report_row の分納/欠品再上書きが、上書きを壊さないこと。
+
+    非処理完了（未処理）行で分納・欠品コメントがあっても、上書きが効いて
+    いれば逐語文字列が最優先で残る（計上済み=処理完了は元々ガード済み）。
+    """
+
+    def _row(self, **kw):
+        return _make_row(order_number="7000001", detail_number="10", **kw)
+
+    def test_keppin_does_not_append_to_override(self):
+        """欠品中コメント＋未処理＋上書き → 「（欠品）」が付かない"""
+        cache = _make_cache(delivery_overrides={"7000001|10": "6月30日納品予定"})
+        _, ans = build_report_row(
+            self._row(ship_status="未処理", comment_detail="欠品中"),
+            cache, today=TODAY, execution_time=EXEC,
+        )
+        assert ans == "6月30日納品予定"
+
+    def test_bunno_does_not_clobber_override(self):
+        """分納コメント＋未処理＋上書き → 「分納」で潰れない"""
+        cache = _make_cache(delivery_overrides={"7000001|10": "6月30日納品予定"})
+        _, ans = build_report_row(
+            self._row(ship_status="未処理",
+                      comment_detail="分納:50個 1/10,30個 未定"),
+            cache, today=TODAY, execution_time=EXEC,
+        )
+        assert ans == "6月30日納品予定"
+
+    def test_no_override_keppin_unchanged(self):
+        """上書きが無ければ欠品の従来挙動（（欠品）付与）は維持＝no-op"""
+        cache = _make_cache()
+        _, ans = build_report_row(
+            self._row(ship_status="未処理", comment_detail="欠品中",
+                      specified_delivery_date=datetime.date(2026, 6, 30)),
+            cache, today=TODAY, execution_time=EXEC,
+        )
+        assert "（欠品）" in ans  # 従来どおり付く
+
+
+class TestKeyNormalization:
+    """指摘③: 手入力の表記ゆれでマッチ漏れ/誤マッチしない共通キー正規化。"""
+
+    def test_variants_map_to_same_key(self):
+        base = normalize_order_detail_key("7000001", "10")
+        assert base == "7000001|10"
+        assert normalize_order_detail_key("7000001", "010") == base   # ゼロ詰め
+        assert normalize_order_detail_key("7000001", "10.0") == base  # Excel数値
+        assert normalize_order_detail_key("７０００００１", "１０") == base  # 全角
+        assert normalize_order_detail_key(7000001, 10) == base        # 数値型セル
+
+    def test_non_numeric_detail_kept_as_string(self):
+        """非数値の明細は文字列のまま（誤って数値化しない）"""
+        assert normalize_order_detail_key("A1", "10A") == "A1|10A"
+
+    def test_lookup_matches_despite_excel_float(self):
+        """シートに 10.0 で入っていても、SAP明細 '10' で照合できる"""
+        from nouki_kaitou.delivery_calc import get_delivery_override
+        # シート読込時に正規化されるので、登録キーは "7000001|10"
+        cache = _make_cache(
+            delivery_overrides={normalize_order_detail_key("7000001", 10.0): "X"}
+        )
+        assert get_delivery_override("7000001", "10", cache) == "X"
